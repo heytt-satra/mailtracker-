@@ -1,4 +1,5 @@
 import { getSupabaseAuthClient } from './supabase-client';
+import { MAILTRACK_API_BASE_URL } from './config';
 
 export type AuthResult = { ok: true; accessToken: string; email: string | null } | { ok: false; message: string };
 
@@ -22,7 +23,14 @@ export function mapAuthResponse(
 }
 
 export async function signUpWithEmail(email: string, password: string): Promise<AuthResult> {
-  const { data, error } = await getSupabaseAuthClient().auth.signUp({ email, password });
+  // MailTrack has no regular website for Supabase's confirmation email to
+  // land on — without this, it falls back to the project's default Site
+  // URL (an unconfigured localhost, since nobody set one up for a project
+  // whose only client is a Chrome extension). Must also be added to the
+  // Supabase project's Redirect URLs allow-list (Authentication > URL
+  // Configuration) or Supabase will silently fall back to Site URL anyway.
+  const emailRedirectTo = `${MAILTRACK_API_BASE_URL}/auth/confirmed`;
+  const { data, error } = await getSupabaseAuthClient().auth.signUp({ email, password, options: { emailRedirectTo } });
   return mapAuthResponse(data, error);
 }
 

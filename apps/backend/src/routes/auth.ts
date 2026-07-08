@@ -38,3 +38,33 @@ authRoute.post('/v1/auth/provision', async (c) => {
 
   return c.json({ apiKey, email: data.user.email ?? null });
 });
+
+/**
+ * Landing page for Supabase's email-confirmation link. MailTrack has no
+ * regular website — without this, Supabase falls back to its default Site
+ * URL (typically an unconfigured `localhost`, since nobody set one up for a
+ * project whose only client is a Chrome extension), which is exactly the
+ * "localhost refused to connect" dead end this route exists to fix. Wired
+ * up via `emailRedirectTo` in the extension's signUp() call (ADR-10);
+ * confirmation itself already happened server-side by the time the browser
+ * lands here, so this page's only job is to say so and send the user back.
+ */
+authRoute.get('/auth/confirmed', (c) => {
+  return c.html(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MailTrack — you're confirmed</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 420px; margin: 4rem auto; text-align: center; color: #202124; }
+      h1 { font-size: 1.1rem; }
+      p { color: #5f6368; font-size: 0.9rem; }
+    </style>
+  </head>
+  <body>
+    <h1>You're confirmed.</h1>
+    <p>Go back to the MailTrack extension's options page and log in with your email and password.</p>
+    <p>You can close this tab.</p>
+  </body>
+</html>`);
+});
