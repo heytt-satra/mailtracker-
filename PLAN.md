@@ -84,6 +84,9 @@ Gmail (web) ── Chrome Extension (MV3, WXT, InboxSDK) ── HTTPS ──▶ 
 - **ADR-3: InboxSDK over raw DOM scraping.** Gmail's DOM is unstable and obfuscated; InboxSDK is the de facto standard used by Streak, Mixmax, etc., and handles Gmail's SPA re-renders correctly.
 - **ADR-4: No-cache pixel response.** `Cache-Control: no-store` on the pixel is required so repeat opens are observable — this is what makes the "verified" escalation ladder possible at all.
 - **ADR-5: Verdicts only escalate, never downgrade or get deleted.** This is a product-integrity decision, not just an engineering one: it is the mechanism that makes "we don't fabricate engagement" true rather than aspirational.
+- **ADR-6: ASN resolved from `request.cf.asn`, not a MaxMind mmdb lookup.** Cloudflare already resolves the requesting IP's ASN at the edge and exposes it on `request.cf.asn`/`asOrganization` for free — no GeoIP database needed in the hot path. This changes MaxMind's role from "resolve IP→ASN" (original plan) to "help build the `asn_intel` category mapping" (asn→apple_mpp/security_scanner/...), which is a strictly smaller and simpler job. Discovered during Phase 1 implementation; adopted because it removes an entire dependency (mmdb parsing in a Worker) for equivalent accuracy.
+- **ADR-7: Polling over SSE for `/v1/events/*`.** True server-push on Cloudflare Workers needs a Durable Object to hold a connection open; without one, an SSE endpoint would be a half-working long-poll wearing an SSE label. Rather than ship that, v1 exposes `GET /v1/events/poll?since=<iso>` and the extension's background worker polls it every few seconds. Real push (Durable Objects, or Supabase Realtime consumed directly by the extension) is tracked in Future Improvements, not silently deferred.
+- **ADR-8: Apple Mail Privacy Protection is detected by IP-range containment, not ASN.** Apple Private Relay's second hop can egress through third-party CDN partner ASNs, not just Apple's own — so an ASN→apple_mpp mapping risks misclassifying unrelated traffic that happens to share an ASN with a CDN partner (a false "not verifiable" for a real human, or worse, silently swallowed opens). Apple publishes an authoritative CSV of egress ranges at `mask-api.icloud.com/egress-ip-ranges.csv` (verified reachable during Phase 1 — response exceeds 10MB, consistent with a real, large, current range list). MailTrack stores these in a Postgres `ip_ranges` table and resolves membership via the native `inet <<= cidr` containment operator through a `classify_ip_category()` SQL function, checked before the ASN-based path in the classifier. `asn_intel` remains correct for security scanners, which do run dedicated ASNs.
 
 ## 6. API Design
 
@@ -96,7 +99,7 @@ Base URL: `https://api.mailtrack.dev` (placeholder domain until purchased)
 | GET | `/l/:token` | Click redirect. 302 to original URL, logs click event | none (public) |
 | GET | `/v1/messages/:msgId/events` | Timeline of raw + classified events for a message | API key, owner-scoped |
 | GET | `/v1/messages/:msgId/status` | Current verdict only (`sent\|delivered\|opened\|clicked\|not_verifiable`) | API key, owner-scoped |
-| GET | `/v1/events/stream` | SSE stream of verdict upgrades for the authenticated user | API key, owner-scoped |
+| GET | `/v1/events/poll?since=<iso>` | Verdict upgrades (opened/clicked) since a timestamp, across the user's messages — see ADR-7 (replaces the originally-planned SSE stream) | API key, owner-scoped |
 | DELETE | `/v1/messages/:msgId` | Delete tracking data for a message | API key, owner-scoped |
 | GET | `/v1/messages/:msgId/export` | CSV export of event timeline | API key, owner-scoped |
 
@@ -104,71 +107,16 @@ All endpoints return JSON except `/p/*` (image/gif) and `/l/*` (302 redirect) an
 
 ## 7. Database Schema
 
-```sql
--- users: one row per installed extension (v1 has no multi-seat orgs)
-create table users (
-  id uuid primary key default gen_random_uuid(),
-  api_key_hash text not null unique,
-  email text,
-  created_at timestamptz not null default now()
-);
+Canonical, executable source: [`db/migrations/0001_init.sql`](./db/migrations/0001_init.sql) — this section is a summary, not a duplicate; if they ever disagree, the migration file wins.
 
--- messages: one row per tracked sent email
-create table messages (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id) on delete cascade,
-  gmail_message_id text,
-  pixel_token text not null unique,
-  subject_hash text,          -- hashed, not stored raw (privacy)
-  sent_at timestamptz not null default now(),
-  status text not null default 'sent'
-    check (status in ('sent','delivered','opened','clicked','not_verifiable')),
-  status_updated_at timestamptz not null default now()
-);
-create index idx_messages_pixel_token on messages(pixel_token);
-create index idx_messages_user_id on messages(user_id);
-
--- link_tokens: one row per rewritten link in a message
-create table link_tokens (
-  id uuid primary key default gen_random_uuid(),
-  message_id uuid not null references messages(id) on delete cascade,
-  token text not null unique,
-  original_url text not null
-);
-
--- raw_events: every fetch/click, unfiltered, append-only
-create table raw_events (
-  id uuid primary key default gen_random_uuid(),
-  message_id uuid not null references messages(id) on delete cascade,
-  kind text not null check (kind in ('pixel_fetch','link_click')),
-  occurred_at timestamptz not null default now(),
-  user_agent text,
-  ip_hash text not null,       -- IP hashed before storage (NFR4)
-  asn integer,
-  headers jsonb,
-  fetch_sequence_ms integer    -- ms since sent_at, for timing filter
-);
-create index idx_raw_events_message_id on raw_events(message_id);
-
--- verdicts: classified, append-only, this is what drives notifications
-create table verdicts (
-  id uuid primary key default gen_random_uuid(),
-  message_id uuid not null references messages(id) on delete cascade,
-  raw_event_id uuid references raw_events(id),
-  verdict text not null check (verdict in ('machine_suspect','verified_open','verified_click','not_verifiable')),
-  reason text not null,        -- human-readable classifier rationale, shown in UI timeline
-  created_at timestamptz not null default now()
-);
-create index idx_verdicts_message_id on verdicts(message_id);
-
--- asn_intel: refreshed weekly from MaxMind + published ranges
-create table asn_intel (
-  asn integer primary key,
-  org_name text,
-  category text not null check (category in ('apple_mpp','security_scanner','residential_isp','datacenter_other','unknown')),
-  updated_at timestamptz not null default now()
-);
-```
+- `users` — one row per installed extension (v1 has no multi-seat orgs). `api_key_hash` only, never plaintext.
+- `messages` — one row per tracked send. `status` is the escalate-only ladder value (`sent|delivered|opened|clicked|not_verifiable`), `pixel_token` is the unique 128-bit token embedded in the pixel URL.
+- `link_tokens` — one row per rewritten link in a message, maps `token → original_url`.
+- `raw_events` — every fetch/click, unfiltered, append-only. Carries `ip_hash` (never raw IP, NFR4), `asn` (from `request.cf.asn`, ADR-6), `ip_category` (resolved inline at log time via `classify_ip_category()`, ADR-8), and `classified_at` (null until the cron sweep processes it — lets the sweep cheaply select the pending queue).
+- `verdicts` — classified, append-only; this is what drives status changes and notifications. Carries a human-readable `reason` shown directly in the UI timeline.
+- `asn_intel` — `asn → category` mapping for security-scanner ASNs (Proofpoint/Mimecast/Barracuda/etc). Populated from verified vendor documentation, never guessed (see Known Issues).
+- `ip_ranges` — `cidr → category` mapping, currently Apple Private Relay egress ranges refreshed weekly from Apple's published CSV. Queried via the native `inet <<= cidr` containment operator wrapped in `classify_ip_category(inet) returns text`, longest-prefix-match wins (ADR-8).
+- RLS is enabled with no policies on every table as defense-in-depth — these tables are only ever touched with the service-role key, never the anon key.
 
 ## 8. Chrome Extension Architecture
 
@@ -183,10 +131,11 @@ create table asn_intel (
 ## 9. Backend Architecture
 
 - **Runtime:** Cloudflare Workers, `Hono` router.
-- **Pixel/click handlers:** minimal, synchronous, no DB write on the hot path beyond a single fire-and-forget insert (`raw_events`) — never block the image response on classification.
-- **Classifier:** runs out-of-band via a Cloudflare Queue consumer (or scheduled Worker cron as a fallback if Queues aren't provisioned) that reads new `raw_events` rows and writes `verdicts`.
-- **IP intelligence refresh:** weekly scheduled Worker (`cron trigger`) pulls MaxMind GeoLite2-ASN snapshot + published Apple/Google/Microsoft/Proofpoint/Barracuda/Mimecast ranges, upserts `asn_intel`.
-- **Data layer:** Supabase Postgres, accessed via `postgres.js` or Supabase's HTTP client (Workers can't hold raw TCP connections without Hyperdrive — **decision: use Supabase's REST/PostgREST interface or Cloudflare Hyperdrive**, documented as an open decision until Phase 1 implementation, see Known Issues).
+- **Pixel handler (`/p/:token.gif`):** returns a static 43-byte GIF synchronously, identical regardless of token validity (no enumeration signal). All DB work — token lookup, IP-range/ASN resolution, `raw_events` insert — runs in `ctx.waitUntil()` after the response is already flushed, so it can never add latency to the image fetch (ADR-1, NFR1).
+- **Click handler (`/l/:token`):** must resolve the token before it can redirect (no safe fallback), so that one lookup is on the hot path; the `raw_events` insert itself still runs in `waitUntil()`.
+- **Classifier sweep:** scheduled Worker cron (`* * * * *`, every minute) reads `raw_events where classified_at is null`, resolves prior-fetch context (first-fetch / burst count) and ASN/IP-range intel, calls the pure `classifyEvent()` function, writes a `verdicts` row, and advances `messages.status` through the escalate-only ladder. Queues would allow lower latency but require a paid Cloudflare plan; documented as a revisit if the 1-minute cron's ~60s worst-case classification lag ever fails NFR7 in practice.
+- **Intel refresh:** weekly scheduled Worker (`0 3 * * 1`) re-downloads Apple's published egress-range CSV into `ip_ranges`. Security-scanner ASN data (`asn_intel`) is written by a separate, manually-invoked upsert path — no data ships until it's sourced from verified vendor docs (see Known Issues).
+- **Data layer:** `@supabase/supabase-js`, which is fetch-based and works natively in Workers — no Hyperdrive or raw TCP connection needed (resolves the open decision from the original plan).
 
 ## 10. Folder Structure
 
@@ -194,48 +143,53 @@ create table asn_intel (
 mailtrack/
   PLAN.md
   README.md
+  package.json           # npm workspaces root
   apps/
-    backend/
+    backend/              # implemented, M1 complete
       src/
-        index.ts            # Hono app entry
+        index.ts           # Hono app entry + scheduled() cron dispatcher
+        types.ts            # Env bindings (Cloudflare secrets/vars)
         routes/
-          messages.ts
-          pixel.ts
-          click.ts
-          events.ts
+          messages.ts        # POST /v1/messages
+          pixel.ts            # GET /p/:token.gif
+          click.ts            # GET /l/:token
+          events.ts           # status/events/export/delete/poll
+        middleware/
+          auth.ts             # API key -> userId
         classifier/
-          rules.ts
+          rules.ts            # classifyEvent() — the core differentiator
           timing.ts
           useragent.ts
           asn.ts
-          escalation.ts
+          escalation.ts       # the escalate-only ladder
+          sweep.ts            # cron: unclassified raw_events -> verdicts
+          intel-refresh.ts    # cron: Apple egress-range refresh
         db/
           client.ts
-          schema.sql
-        types.ts
+        lib/
+          crypto.ts           # token generation, SHA-256
+          cf.ts                # request.cf.asn reader (ADR-6)
       tests/
-        classifier.test.ts
-        pixel.test.ts
-        acceptance.regression.test.ts   # the mandatory phone regression test
+        classifier.test.ts   # 22 tests incl. all 6 permanent regression fixtures
       wrangler.toml
       package.json
-    extension/
-      (WXT project — scaffolded in Phase 2)
+      tsconfig.json
+      vitest.config.ts
+    extension/              # not yet started — Phase 2 (M3)
   packages/
     shared/
       src/
         types.ts             # shared types between extension + backend
   db/
     migrations/
-  docs/
-    engineering-journal.md
+      0001_init.sql          # canonical schema, keep in sync with section 7
 ```
 
 ## 11. Development Roadmap & Milestones
 
 - **M0 — Planning (this doc).** Done 2026-07-08.
-- **M1 — Backend Phase 1:** pixel/click/messages endpoints, raw event logging, DB schema, unit tests. *(in progress)*
-- **M2 — Classifier v1:** timing filter, UA fingerprint, ASN filter, escalation ladder, unit tests against fixtures.
+- **M1 — Backend Phase 1:** pixel/click/messages endpoints, raw event logging, DB schema, unit tests. **Code complete 2026-07-08.** Not yet deployed (no Supabase/Cloudflare credentials) — see Known Issues.
+- **M2 — Classifier v1:** timing filter, UA fingerprint, ASN filter, IP-range filter, escalation ladder, unit tests against fixtures. **Code complete 2026-07-08** (22/22 tests passing incl. all 6 permanent regression fixtures). Tuning against real-device data still pending deployment.
 - **M3 — Extension Phase 2:** WXT scaffold, InboxSDK compose hook, pixel/link injection, sent-status chip.
 - **M4 — Notification loop:** SSE/poll background worker, desktop notifications, the mandatory phone acceptance test passing on a real device.
 - **M5 — Dashboard/detail view + CSV export + delete-my-data.**
@@ -247,17 +201,21 @@ mailtrack/
 - [x] PLAN.md created
 - [x] Repo initialized and pushed
 - [x] Monorepo folder structure
-- [ ] Backend: Hono app skeleton + wrangler config
-- [ ] Backend: POST /v1/messages
-- [ ] Backend: GET /p/:token.gif
-- [ ] Backend: GET /l/:token
-- [ ] Backend: raw_events logging
-- [ ] DB: schema.sql + migration applied to Supabase
-- [ ] Classifier: timing filter
-- [ ] Classifier: UA fingerprint
-- [ ] Classifier: ASN filter
-- [ ] Classifier: escalation ladder
-- [ ] Classifier: unit tests against real-device fixtures
+- [x] Backend: Hono app skeleton + wrangler config
+- [x] Backend: POST /v1/messages
+- [x] Backend: GET /p/:token.gif
+- [x] Backend: GET /l/:token
+- [x] Backend: raw_events logging (incl. IP-range + ASN dual signal, ADR-8)
+- [x] Backend: classifier sweep cron + intel refresh cron wired into index.ts
+- [x] DB: schema.sql written (`db/migrations/0001_init.sql`) — **not yet applied**, no Supabase project provisioned (see Known Issues)
+- [x] Classifier: timing filter
+- [x] Classifier: UA fingerprint
+- [x] Classifier: ASN filter
+- [x] Classifier: IP-range filter (Apple Private Relay, ADR-8)
+- [x] Classifier: escalation ladder
+- [x] Classifier: unit tests — 22 tests passing, including all 6 permanent regression fixtures from section 15
+- [ ] Classifier: tuning pass against real-device fixtures (needs a deployed backend + real sends, blocked on credentials)
+- [ ] Backend: integration tests against a live Supabase instance (blocked on credentials)
 - [ ] Extension: WXT scaffold
 - [ ] Extension: InboxSDK compose hook + pixel/link injection
 - [ ] Extension: sent-status chip
@@ -275,15 +233,15 @@ mailtrack/
 
 ## 13. Security Checklist
 
-- [ ] All tokens (pixel, link, API key) are cryptographically random, ≥128 bits.
-- [ ] API keys are stored hashed (never plaintext) — matches `users.api_key_hash`.
-- [ ] IP addresses hashed at rest; raw IP never written to `raw_events` unhashed.
-- [ ] Pixel/click endpoints rate-limited per token to prevent enumeration/abuse.
-- [ ] CORS locked to the extension's origin for authenticated endpoints.
-- [ ] No user-supplied data reflected unescaped (XSS) in any dashboard view.
-- [ ] Redirect endpoint validates the stored `original_url` was the one registered at send time (no open-redirect via tampered tokens).
-- [ ] Dependency audit (`npm audit` / `pnpm audit`) clean before release.
-- [ ] Secrets (Supabase keys, MaxMind license) stored as Worker secrets, never committed.
+- [x] All tokens (pixel, link, API key) are cryptographically random, ≥128 bits (`lib/crypto.ts::randomToken`, 16 bytes via `crypto.getRandomValues`).
+- [x] API keys are stored hashed (never plaintext) — matches `users.api_key_hash`, SHA-256 via Web Crypto.
+- [x] IP addresses hashed at rest; raw IP never written to `raw_events` unhashed (`ip_hash` column, raw IP only touched transiently in the pixel/click handler to derive `ip_category` and the hash).
+- [ ] Pixel/click endpoints rate-limited per token to prevent enumeration/abuse. **Not yet implemented** — needs Cloudflare rate limiting rules or a Worker-side token-bucket in KV; tracked for M6.
+- [ ] CORS locked to the extension's origin for authenticated endpoints. **Not yet implemented** — needs the actual extension ID, which doesn't exist until the extension is published/loaded unpacked; tracked for M3.
+- [ ] No user-supplied data reflected unescaped (XSS) in any dashboard view. N/A yet — no dashboard UI built (M5).
+- [x] Redirect endpoint only ever redirects to `original_url` looked up server-side by token; there is no client-supplied URL parameter, so open-redirect via tampering is structurally not possible.
+- [ ] Dependency audit clean before release. `npm audit` currently reports 9 vulnerabilities (5 moderate/3 high/1 critical) in `wrangler`'s transitive dev dependencies — not in shipped runtime code. Deferred to before M7 release; re-audit then since `wrangler` ships frequent patches.
+- [x] Secrets (Supabase keys, MaxMind license) referenced only via `Env` bindings / `wrangler secret put`, never present in any committed file — verified via `.gitignore` (`.env*`) and `wrangler.toml` containing only non-secret `[vars]`.
 
 ## 14. Testing Strategy
 
@@ -294,23 +252,28 @@ mailtrack/
 
 ## 15. Regression Tests (permanent)
 
-1. **The mandatory phone acceptance test** (`acceptance.regression.test.ts`): send a tracked email to a real device inbox, confirm notification-preview-only fetch does NOT upgrade status past `delivered`, confirm actual open upgrades to `opened` (verified), confirm link click upgrades to `clicked`. This test requires a live device and is run manually per release until a device-farm harness exists; the assertions and fixture format are automated now so the harness can be swapped in later without rewriting the test.
-2. Apple MPP fixture: pixel fetch from a known Apple private-relay ASN within 5s of send never escalates to `opened`.
+Two tiers: a manual live-device test that is the ultimate source of truth, and an automated unit suite (`apps/backend/tests/classifier.test.ts`, `describe('regression: permanent fixtures')`) that exercises the same six scenarios against the pure classifier functions on every commit. The unit suite passes today (22/22); the live-device test can't run until the backend is deployed (see Known Issues) but its steps are specified now so it's ready the moment deployment credentials exist.
+
+1. **The mandatory phone acceptance test (manual, live device):** send a tracked email to a real device inbox, confirm notification-preview-only fetch does NOT upgrade status past `delivered`, confirm actual open upgrades to `opened` (verified), confirm link click upgrades to `clicked`. Run per release until a device-farm harness exists. Unit-level proxy: `classifier.test.ts` fixture 1.
+2. Apple MPP fixture: pixel fetch from a known Apple Private Relay egress range within 5s of send never escalates to `opened` (now IP-range based per ADR-8, plus an ASN-based fallback fixture).
 3. Scanner-burst fixture: 10 resource fetches within 500ms of delivery never escalates past `delivered`.
 4. Repeat-fetch fixture: pixel fetched once at delivery (machine pattern) then again 2 hours later (human pattern) escalates to `opened`.
-5. Click-always-verifies fixture: any link click, regardless of prior pixel verdicts, escalates to `clicked`.
+5. Click-always-verifies fixture: any link click, regardless of prior pixel verdicts (even from an Apple MPP range), escalates to `clicked`.
 6. Verdict-never-downgrades fixture: once `opened`, a later `machine_suspect` classification does not revert status.
 
 ## 16. Known Issues / Open Decisions
 
-- **DB connectivity from Workers:** Supabase direct Postgres connections don't work well from Workers' fetch-based runtime without Cloudflare Hyperdrive or PostgREST. Decision needed in Phase 1 implementation: use Supabase's PostgREST/JS client (simpler, slightly higher latency) vs. Hyperdrive (faster, requires paid Cloudflare plan). **Leaning PostgREST for v1** to stay on free tiers; revisit if latency goals aren't met.
+- **DB connectivity from Workers: resolved.** `@supabase/supabase-js` is fetch-based and works natively in Workers; no Hyperdrive needed (ADR/decision closed during Phase 1, see section 9).
 - **Multi-recipient tracking:** Gmail sends one message body to all recipients on a thread; a single shared pixel cannot distinguish which recipient opened it. Documented as a v1 limitation, matches competitor behavior. Individual-send mode is a Phase 5+ future improvement.
-- **Credentials required for real deployment, not yet provided:** Cloudflare account + Workers/Queues access, Supabase project URL + service key, MaxMind GeoLite2 license key, domain for the API. Code is being written against `.env`/Worker-secret placeholders so it is deploy-ready the moment these are supplied.
+- **Credentials required for real deployment, not yet provided:** Cloudflare account + Workers access, Supabase project URL + service key. Code is fully written against `Env` placeholders (`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `MAXMIND_LICENSE_KEY`) and is deploy-ready the moment `wrangler login` + `wrangler secret put` are run with real values. **This blocks:** applying `db/migrations/0001_init.sql` to a real database, running `wrangler dev`/`deploy`, and the live-device acceptance test.
+- **MaxMind GeoLite2-ASN integration deferred, not implemented.** The original plan used MaxMind to resolve IP→ASN; ADR-6 made that unnecessary (Cloudflare gives ASN for free via `request.cf.asn`). MaxMind's remaining potential use — bulk-sourcing the `asn_intel` security-scanner category mapping — needs the GeoLite2-ASN-CSV feed, which ships as a `.zip` requiring a zip-parsing dependency not yet added. Scanner ASN rows must currently be entered manually from verified vendor documentation via `upsertAsnIntel()`; shipping guessed ASN numbers was rejected as too risky (a wrong number silently suppresses real opens — the exact failure this product exists to prevent). `MAXMIND_LICENSE_KEY` remains in `Env` for when this is built out.
+- **Apple egress-range endpoint verified reachable but not yet ingested into a real database** (no Supabase project to upsert into yet). `refreshAppleRelayRanges()` is implemented and will run on first successful cron trigger once deployed.
 - **No `gh` CLI available in this environment** — GitHub operations use `git` directly over HTTPS with the credential manager already configured on this machine.
 
 ## 17. Technical Debt
 
-- (none yet — will be logged here as shortcuts are taken, with the reason and a plan to resolve)
+- `npm audit` reports 9 vulnerabilities (5 moderate, 3 high, 1 critical), all in `wrangler`'s transitive dev dependencies (not in shipped Worker code). Plan: re-audit and update `wrangler` immediately before M7 release rather than chasing upstream patches mid-development.
+- `asn_intel` ships with zero seed rows (see Known Issues) — the security-scanner detection branch of the classifier is implemented and tested but has no real data to act on until rows are sourced. Not a code defect, but means M2's "tuning against real fixtures" milestone has a hard dependency on this being populated first.
 
 ## 18. Release Checklist
 
@@ -339,4 +302,11 @@ mailtrack/
 - Verified environment: no `gh` CLI available; `git` credential manager is configured and authenticated; target repo `heytt-satra/mailtracker-` exists and is empty and reachable.
 - Decided architecture: Cloudflare Workers + Hono backend, Supabase Postgres, WXT + InboxSDK extension. Verdicts escalate-only ladder is both a technical and product-integrity mechanism.
 - Flagged that real deployment (Cloudflare, Supabase, MaxMind) needs credentials not yet available in this environment; proceeding with deploy-ready scaffolding against env placeholders so no work is blocked.
-- Next: scaffold backend (Hono skeleton, pixel/click/messages routes, raw_events logging, DB schema file) and push as first commit milestone.
+- Initialized git, pushed first commit (README + .gitignore + PLAN.md) to `heytt-satra/mailtracker-`.
+- Built the full M1/M2 backend: npm-workspaces monorepo (`@mailtrack/shared`, `@mailtrack/backend`), Hono app on Cloudflare Workers, `POST /v1/messages`, `GET /p/:token.gif`, `GET /l/:token`, status/timeline/export/delete/poll routes, API-key auth middleware.
+- Built the classifier (`rules.ts` + `timing.ts` + `useragent.ts` + `asn.ts` + `escalation.ts`) as pure, DB-free functions and wrote 22 unit tests, including all 6 permanent regression fixtures from section 15. All passing. `tsc --noEmit` clean across the backend.
+- Mid-build correctness fix: caught that Apple Private Relay egress doesn't reliably map to a single ASN (it can ride third-party CDN partner ASNs), which would have made a pure ASN-based `apple_mpp` check misclassify unrelated traffic. Verified Apple's published egress-range CSV is real and reachable (`mask-api.icloud.com/egress-ip-ranges.csv`, response >10MB) and switched Apple MPP detection to IP-range containment via a Postgres `classify_ip_category()` function (ADR-8), keeping ASN-based detection only for security scanners where it's actually reliable.
+- Two other architecture corrections made and documented as ADRs rather than left as silent decisions: ADR-6 (Cloudflare's `request.cf.asn` replaces MaxMind for IP→ASN resolution — MaxMind's role shrinks to sourcing the scanner-ASN category list) and ADR-7 (polling endpoint instead of a half-working SSE stream, since real server push needs a Durable Object).
+- Deliberately did NOT seed `asn_intel` with guessed scanner ASN numbers — wrong numbers would silently suppress real opens, which is the exact failure mode this product exists to prevent. Documented as a blocker requiring verified vendor data.
+- Committed and pushed the M1/M2 backend milestone.
+- Next: Phase 2 — WXT extension scaffold, InboxSDK compose hook, pixel/link injection into Gmail sends.
