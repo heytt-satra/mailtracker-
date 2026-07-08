@@ -8,6 +8,19 @@ export function getSupabase(env: Env): SupabaseClient {
   });
 }
 
+/**
+ * Anon-key client, used ONLY to validate a caller-supplied Supabase access
+ * token via `.auth.getUser(jwt)` — never for privileged table access (that's
+ * what the service-key client above is for). Confirmed real API:
+ * `getUser(jwt?: string): Promise<{data: {user}, error}>` validates the
+ * given JWT server-side and returns the Supabase Auth user it belongs to.
+ */
+export function getSupabaseAnon(env: Env): SupabaseClient {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
+    auth: { persistSession: false },
+  });
+}
+
 export interface UserRow {
   id: string;
 }
@@ -16,6 +29,24 @@ export async function getUserByApiKeyHash(db: SupabaseClient, apiKeyHash: string
   const { data, error } = await db.from('users').select('id').eq('api_key_hash', apiKeyHash).maybeSingle();
   if (error) throw error;
   return data;
+}
+
+/**
+ * Called by POST /v1/auth/provision. `id` here is the Supabase Auth user's
+ * own id (the "profiles" pattern — see db/migrations/0001_init.sql). Each
+ * call rotates the API key: simplest self-serve recovery story for v1 (no
+ * separate "forgot my key" flow needed) at the cost of invalidating any
+ * previously-issued key for the account, which is an acceptable trade for a
+ * key meant to live in exactly one browser's extension storage.
+ */
+export async function upsertUserApiKey(
+  db: SupabaseClient,
+  params: { authUserId: string; email: string | null; apiKeyHash: string },
+): Promise<void> {
+  const { error } = await db
+    .from('users')
+    .upsert({ id: params.authUserId, email: params.email, api_key_hash: params.apiKeyHash }, { onConflict: 'id' });
+  if (error) throw error;
 }
 
 export interface MessageRow {

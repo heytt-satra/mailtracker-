@@ -5,6 +5,7 @@ import { messagesRoute } from './routes/messages';
 import { pixelRoute } from './routes/pixel';
 import { clickRoute } from './routes/click';
 import { eventsRoute } from './routes/events';
+import { authRoute } from './routes/auth';
 import { getSupabase } from './db/client';
 import { runClassifierSweep } from './classifier/sweep';
 import { refreshAppleRelayRanges } from './classifier/intel-refresh';
@@ -21,6 +22,7 @@ app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT }));
 // (permissive '*') until the extension is published and its real ID known.
 app.use('/v1/*', (c, next) => cors({ origin: c.env.ALLOWED_EXTENSION_ORIGIN ?? '*' })(c, next));
 
+app.route('/', authRoute);
 app.route('/', messagesRoute);
 app.route('/', pixelRoute);
 app.route('/', clickRoute);

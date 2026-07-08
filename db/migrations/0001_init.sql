@@ -3,8 +3,13 @@
 
 create extension if not exists pgcrypto;
 
+-- id is the Supabase Auth user's own id (the classic "profiles" pattern) —
+-- no separate auth_user_id indirection column. A row here is created by
+-- POST /v1/auth/provision the first time someone with a valid Supabase
+-- session (signed up via email+password, or later Google OAuth) provisions
+-- a MailTrack API key; there is no other creation path.
 create table users (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key references auth.users(id) on delete cascade,
   api_key_hash text not null unique,
   email text,
   created_at timestamptz not null default now()
