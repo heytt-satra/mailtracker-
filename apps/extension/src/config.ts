@@ -1,8 +1,9 @@
-// api.mailtrack.dev is a placeholder domain (PLAN.md Known Issues — no domain
-// purchased, no Cloudflare/Supabase deployment yet). During `wxt dev`, wrangler's
-// default local port (8787) is used instead so the extension is testable against
+// Deployed 2026-07-08 to Cloudflare's workers.dev subdomain (no custom
+// domain purchased yet — this is a real, permanent-until-redeployed URL,
+// not a placeholder). During `wxt dev`, wrangler's default local port
+// (8787) is used instead so the extension is testable against
 // `wrangler dev` without editing this file.
-export const MAILTRACK_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:8787' : 'https://api.mailtrack.dev';
+export const MAILTRACK_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:8787' : 'https://mailtrack-api.heyttsatra17.workers.dev';
 
 // Registered at https://register.inboxsdk.com (2026-07-08).
 export const INBOXSDK_APP_ID = 'sdk_Heytt_5a9ab5a6c4';
