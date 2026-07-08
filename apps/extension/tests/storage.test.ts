@@ -29,7 +29,7 @@ describe('storage', () => {
 
   it('getSettings returns defaults when nothing is stored', async () => {
     const settings = await getSettings();
-    expect(settings).toEqual({ apiKey: null, trackingEnabledByDefault: true, notificationsEnabled: true });
+    expect(settings).toEqual({ apiKey: null, accountEmail: null, trackingEnabledByDefault: true, notificationsEnabled: true });
   });
 
   it('setSettings merges into existing settings rather than replacing them', async () => {

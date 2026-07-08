@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMessage, deleteMessage, getMessageStatus, MailTrackApiError, pollEvents } from '../src/api-client';
+import { createMessage, deleteMessage, getMessageStatus, MailTrackApiError, pollEvents, provisionApiKey } from '../src/api-client';
 
 describe('api-client', () => {
   const originalFetch = globalThis.fetch;
@@ -57,5 +57,23 @@ describe('api-client', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     await pollEvents('key', '2026-07-08T00:00:00.000Z');
     expect(fetchMock.mock.calls[0][0]).toContain('since=2026-07-08T00%3A00%3A00.000Z');
+  });
+
+  it('provisionApiKey sends the Supabase access token as the Bearer, not a MailTrack API key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ apiKey: 'new-key', email: 'a@b.com' }) });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await provisionApiKey('supabase-jwt-abc');
+
+    expect(result).toEqual({ apiKey: 'new-key', email: 'a@b.com' });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/auth/provision');
+    expect(init.method).toBe('POST');
+    expect(init.headers.Authorization).toBe('Bearer supabase-jwt-abc');
+  });
+
+  it('provisionApiKey throws MailTrackApiError on failure', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 }) as unknown as typeof fetch;
+    await expect(provisionApiKey('bad-token')).rejects.toBeInstanceOf(MailTrackApiError);
   });
 });
