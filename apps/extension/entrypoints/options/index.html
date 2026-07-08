@@ -18,22 +18,25 @@
   <body>
     <h1>MailTrack</h1>
 
-    <section>
+    <section aria-labelledby="account-heading">
+      <h2 id="account-heading" style="font-size:1rem;margin:0 0 0.75rem">Account</h2>
       <label for="apiKey">API key</label>
       <input type="password" id="apiKey" placeholder="Paste your MailTrack API key" />
       <div class="toggle-row"><input type="checkbox" id="trackingEnabled" /><label for="trackingEnabled" style="margin:0">Track new emails by default</label></div>
       <div class="toggle-row"><input type="checkbox" id="notificationsEnabled" /><label for="notificationsEnabled" style="margin:0">Notify me on verified opens and clicks</label></div>
       <button id="save">Save</button>
-      <div id="status"></div>
+      <div id="status" role="status" aria-live="polite"></div>
     </section>
 
-    <section>
+    <section aria-labelledby="export-heading">
+      <h2 id="export-heading" style="font-size:1rem;margin:0 0 0.75rem">Export</h2>
       <label for="exportMsgId">Export a message's event timeline (CSV)</label>
       <input type="text" id="exportMsgId" placeholder="Message ID" />
       <button id="export">Download CSV</button>
     </section>
 
-    <section>
+    <section aria-labelledby="delete-heading">
+      <h2 id="delete-heading" style="font-size:1rem;margin:0 0 0.75rem">Delete data</h2>
       <label for="deleteMsgId">Delete tracking data for a message</label>
       <input type="text" id="deleteMsgId" placeholder="Message ID" />
       <button id="delete">Delete</button>
