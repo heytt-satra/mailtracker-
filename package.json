@@ -1,0 +1,13 @@
+{
+  "name": "mailtracker",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace=apps/backend",
+    "dev:backend": "npm run dev --workspace=apps/backend"
+  }
+}

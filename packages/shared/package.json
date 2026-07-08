@@ -1,0 +1,7 @@
+{
+  "name": "@mailtrack/shared",
+  "private": true,
+  "version": "0.1.0",
+  "main": "src/types.ts",
+  "types": "src/types.ts"
+}
