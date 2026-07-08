@@ -4,22 +4,17 @@
 // `wrangler dev` without editing this file.
 export const MAILTRACK_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:8787' : 'https://api.mailtrack.dev';
 
-// Free registration at https://register.inboxsdk.com — NOT YET OBTAINED. The
-// Gmail integration will fail to load until this placeholder is replaced with
-// a real registered App ID (see PLAN.md Known Issues). Left as an obvious
-// placeholder rather than a silently-broken empty string so the failure mode
-// is loud during development.
-export const INBOXSDK_APP_ID = 'REPLACE_WITH_REGISTERED_INBOXSDK_APP_ID';
+// Registered at https://register.inboxsdk.com (2026-07-08).
+export const INBOXSDK_APP_ID = 'sdk_Heytt_5a9ab5a6c4';
 
-// Supabase project URL + anon key — both public-safe by Supabase's own
-// design (client apps are meant to embed the anon key; access is enforced
-// by RLS server-side, not by keeping this secret). Used ONLY for the
+// Supabase project URL + publishable (anon) key — both public-safe by
+// Supabase's own design (client apps are meant to embed this; access is
+// enforced by RLS server-side, not by keeping it secret). Used ONLY for the
 // signup/login screen's direct Supabase Auth calls (ADR-10) — never for
 // direct table access, which always goes through the MailTrack API and its
-// own api-key auth. NOT YET SET — loud placeholders until a real Supabase
-// project exists (see PLAN.md Known Issues).
-export const SUPABASE_URL = 'REPLACE_WITH_SUPABASE_PROJECT_URL';
-export const SUPABASE_ANON_KEY = 'REPLACE_WITH_SUPABASE_ANON_KEY';
+// own api-key auth.
+export const SUPABASE_URL = 'https://dsoymnodofvbedbjquuv.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_Acb2i9J-QrtTJanPk3tV3A_S_lTWTdh';
 
 // NFR2: tracking must never block or delay a send. If POST /v1/messages
 // hasn't resolved by this deadline, the compose hook lets the email send
