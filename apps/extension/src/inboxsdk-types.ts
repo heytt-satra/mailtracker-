@@ -19,6 +19,7 @@ export interface SentEvent {
 export interface ComposeView {
   getHTMLContent: () => string;
   setBodyHTML: (html: string) => void;
+  getSubject: () => string;
   send: (options?: { sendAndArchive?: boolean }) => void;
   on(event: 'presending', handler: (event: PresendingEvent) => void): void;
   on(event: 'sent', handler: (event: SentEvent) => void): void;

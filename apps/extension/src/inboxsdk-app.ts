@@ -49,7 +49,8 @@ async function injectTrackingThenSend(composeView: ComposeView): Promise<string 
     if (settings.trackingEnabledByDefault && settings.apiKey) {
       const html = composeView.getHTMLContent();
       const linkUrls = extractLinkUrls(html);
-      const result = await createMessage(settings.apiKey, { linkUrls }, COMPOSE_INJECTION_TIMEOUT_MS);
+      const subject = composeView.getSubject();
+      const result = await createMessage(settings.apiKey, { linkUrls, subject }, COMPOSE_INJECTION_TIMEOUT_MS);
       composeView.setBodyHTML(appendTrackingPixel(rewriteLinks(html, result.linkMap), result.pixelUrl));
       msgId = result.msgId;
     }
