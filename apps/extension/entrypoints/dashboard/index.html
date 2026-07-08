@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MailTrack dashboard</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; color: #202124; }
+      h1 { font-size: 1.25rem; }
+      #signedOutNotice { display: none; color: #5f6368; }
+      #signedOutNotice.visible { display: block; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      th { text-align: left; font-size: 0.8rem; color: #5f6368; padding: 0.5rem; border-bottom: 1px solid #dadce0; }
+      td { padding: 0.5rem; border-bottom: 1px solid #f1f3f4; font-size: 0.9rem; vertical-align: top; }
+      tr.message-row { cursor: pointer; }
+      tr.message-row:hover { background: #f8f9fa; }
+      .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; }
+      .subject { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .detail-row td { background: #fafafa; padding: 0.75rem 1rem; }
+      .event { padding: 0.4rem 0; border-bottom: 1px dotted #e0e0e0; font-size: 0.85rem; }
+      .event.suppressed { opacity: 0.5; }
+      .event .verdict { font-weight: 600; }
+      .event .reason { color: #5f6368; }
+      .empty { color: #5f6368; padding: 1rem 0; }
+      #loadMore { margin-top: 1rem; }
+      #loading { color: #5f6368; }
+    </style>
+  </head>
+  <body>
+    <h1>MailTrack dashboard</h1>
+    <p id="signedOutNotice">Sign in from the extension's options page first.</p>
+    <p id="loading">Loading…</p>
+    <table id="messageTable" style="display:none">
+      <thead>
+        <tr><th>Status</th><th>Subject</th><th>Sent</th></tr>
+      </thead>
+      <tbody id="messageTableBody"></tbody>
+    </table>
+    <p id="emptyState" class="empty" style="display:none">No tracked messages yet. Send a tracked email from Gmail to see it here.</p>
+    <button id="loadMore" style="display:none">Load more</button>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

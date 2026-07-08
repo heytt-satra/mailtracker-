@@ -1,4 +1,4 @@
-import type { CreateMessageRequest, CreateMessageResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
+import type { CreateMessageRequest, CreateMessageResponse, MessageListResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
 import { MAILTRACK_API_BASE_URL } from './config';
 
 export class MailTrackApiError extends Error {}
@@ -34,6 +34,11 @@ async function request<T>(path: string, apiKey: string, init: RequestInit = {}, 
  */
 export function createMessage(apiKey: string, body: CreateMessageRequest, timeoutMs: number): Promise<CreateMessageResponse> {
   return request<CreateMessageResponse>('/v1/messages', apiKey, { method: 'POST', body: JSON.stringify(body) }, timeoutMs);
+}
+
+/** Dashboard message list (M5), newest-first, paginated via nextOffset. */
+export function listMessages(apiKey: string, offset = 0): Promise<MessageListResponse> {
+  return request<MessageListResponse>(`/v1/messages?offset=${offset}`, apiKey);
 }
 
 export function getMessageStatus(apiKey: string, msgId: string): Promise<MessageStatusResponse> {
