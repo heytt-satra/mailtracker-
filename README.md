@@ -22,38 +22,38 @@ Verdicts only escalate: `Sent → Delivered → Opened (verified) → Clicked`. 
 
 ## Status
 
-Backend (M1/M2) and extension (M3/M4) are code-complete, typechecked, and unit-tested — see [PLAN.md](./PLAN.md) section 11 for the full checklist. **Nothing is deployed yet.** Everything below this point requires accounts/credentials that don't exist in the environment this was built in — each step notes exactly what's needed and why it can't be automated further.
+Backend (M1/M2, plus M6 hardening) and extension (M3/M4, plus self-serve signup) are code-complete, typechecked, and unit-tested — see [PLAN.md](./PLAN.md) section 11 for the full checklist. **Nothing is deployed yet.** Everything below this point requires accounts/credentials that don't exist in the environment this was built in — each step notes exactly what's needed and why it can't be automated further.
 
 ## Local development (no external accounts needed)
 
 ```bash
 npm install                                    # installs all three workspaces
 npm run test --workspace=apps/backend          # 27 tests
-npm run test --workspace=apps/extension        # 20 tests
+npm run test --workspace=apps/extension        # 26 tests
 npm run typecheck --workspace=apps/backend     # or cd into either app and run directly
 npm run typecheck --workspace=apps/extension
-cd apps/extension && npx wxt build             # produces .output/chrome-mv3, a loadable (if not yet InboxSDK-functional) extension
+cd apps/extension && npx wxt build             # produces .output/chrome-mv3, a loadable (if not yet InboxSDK/Supabase-functional) extension
 ```
 
 ## Deploying the backend
 
 1. **Cloudflare account.** `cd apps/backend && npx wrangler login`.
-2. **Supabase project.** Create one at supabase.com, then run `db/migrations/0001_init.sql` against it (SQL editor, or `supabase db push` if using the Supabase CLI).
+2. **Supabase project.** Create one at supabase.com, then run `db/migrations/0001_init.sql` against it (SQL editor, or `supabase db push` if using the Supabase CLI). Supabase Auth (email+password) is on by default — no extra setup needed for that part.
 3. **Set Worker secrets** (never put these in `wrangler.toml`, which is committed):
    ```bash
    npx wrangler secret put SUPABASE_URL
-   npx wrangler secret put SUPABASE_SERVICE_KEY   # the service_role key, not anon — the Worker needs to bypass RLS (see PLAN.md section 7)
+   npx wrangler secret put SUPABASE_SERVICE_KEY   # the service_role key — the Worker needs to bypass RLS (see PLAN.md section 7)
+   npx wrangler secret put SUPABASE_ANON_KEY      # public-safe client key, used only to validate signed-in users' tokens (ADR-10)
    ```
 4. **Deploy:** `npx wrangler deploy`. This also registers the two cron triggers (classifier sweep, Apple relay range refresh) and the rate-limiting bindings declared in `wrangler.toml` — no extra provisioning needed for those, they're declarative.
-5. **Create a user + API key** for yourself: insert a row into `users` with `api_key_hash` set to `sha256(your-chosen-key)`, hex-encoded (matches `apps/backend/src/lib/crypto.ts::sha256Hex`). There's no self-serve signup yet (v1 is single-user).
-6. **Update `apps/extension/src/config.ts`** — `MAILTRACK_API_BASE_URL` — with your deployed Worker's URL, and `apps/extension/wxt.config.ts`'s `host_permissions` to match.
+5. **Update `apps/extension/src/config.ts`** — `MAILTRACK_API_BASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` — with your deployed Worker's URL and Supabase project's public values, and `apps/extension/wxt.config.ts`'s `host_permissions` to match if you're not using Supabase's standard `*.supabase.co` domain.
 
 ## Loading the extension
 
-1. **Register a free InboxSDK App ID** at register.inboxsdk.com (a couple of minutes, requires a Google account — this is the one step that's fundamentally a human-account action, not something to script). Replace the placeholder in `apps/extension/src/config.ts::INBOXSDK_APP_ID`.
+1. **Register a free InboxSDK App ID** at register.inboxsdk.com (a couple of minutes, requires a Google account — this is a *developer* credential for the Gmail integration, unrelated to any end-user login). Replace the placeholder in `apps/extension/src/config.ts::INBOXSDK_APP_ID`.
 2. `cd apps/extension && npx wxt build`.
 3. In Chrome, go to `chrome://extensions`, enable Developer Mode, "Load unpacked", select `apps/extension/.output/chrome-mv3`.
-4. Open the extension's options page (right-click its toolbar icon → Options), paste in the API key from the step above, save.
+4. Open the extension's options page (right-click its toolbar icon → Options). Sign up with an email + password — this calls Supabase Auth directly and exchanges the resulting session for a MailTrack API key automatically (ADR-10). No manual key handling needed; the "Advanced: enter an API key manually" fallback is there for troubleshooting only.
 5. Open Gmail, compose and send a test email — the compose hook should inject tracking transparently (fails open silently if anything's misconfigured; check the extension's service worker console via `chrome://extensions` → "service worker" link, and the content script console in Gmail's own devtools).
 
 ## Running the mandatory acceptance test
