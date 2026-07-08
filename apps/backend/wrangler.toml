@@ -1,0 +1,17 @@
+name = "mailtrack-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# Non-secret config. Secrets (SUPABASE_URL, SUPABASE_SERVICE_KEY, MAXMIND_LICENSE_KEY)
+# are set via `wrangler secret put <NAME>` and must never be committed here.
+[vars]
+ENVIRONMENT = "development"
+
+# Classifier sweep (reads new raw_events, writes verdicts) runs every minute.
+# ADR-1 in PLAN.md: classification must never run inline on the pixel/click hot path.
+# Cloudflare Queues would be preferable for lower latency but require a paid plan;
+# a 1-minute cron sweep is the free-tier-compatible default. Revisit if Queues become available.
+#
+# Weekly ASN intelligence refresh (Apple MPP / scanner ranges) runs Monday 03:00 UTC.
+[triggers]
+crons = ["* * * * *", "0 3 * * 1"]
