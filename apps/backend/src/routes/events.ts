@@ -1,0 +1,95 @@
+import { Hono } from 'hono';
+import type { MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
+import type { Env, Variables } from '../types';
+import { deleteMessage, getMessageById, getMessageTimeline, getSupabase } from '../db/client';
+import { apiKeyAuth } from '../middleware/auth';
+
+export const eventsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+eventsRoute.use('/v1/messages/*', apiKeyAuth);
+
+async function requireOwnedMessage(c: { env: Env; get: (k: 'userId') => string }, msgId: string) {
+  const db = getSupabase(c.env);
+  const message = await getMessageById(db, msgId);
+  if (!message || message.user_id !== c.get('userId')) return null;
+  return message;
+}
+
+eventsRoute.get('/v1/messages/:msgId/status', async (c) => {
+  const message = await requireOwnedMessage(c, c.req.param('msgId'));
+  if (!message) return c.json({ error: 'Not found' }, 404);
+  const response: MessageStatusResponse = {
+    msgId: message.id,
+    status: message.status,
+    statusUpdatedAt: message.status_updated_at,
+  };
+  return c.json(response);
+});
+
+eventsRoute.get('/v1/messages/:msgId/events', async (c) => {
+  const message = await requireOwnedMessage(c, c.req.param('msgId'));
+  if (!message) return c.json({ error: 'Not found' }, 404);
+
+  const db = getSupabase(c.env);
+  const timeline = await getMessageTimeline(db, message.id);
+  const events: TimelineEvent[] = timeline.map((row) => ({
+    occurredAt: row.occurred_at,
+    kind: row.kind,
+    verdict: row.verdict,
+    reason: row.reason,
+    suppressed: row.verdict === 'machine_suspect' || row.verdict === 'not_verifiable',
+  }));
+  return c.json({ msgId: message.id, status: message.status, events });
+});
+
+eventsRoute.get('/v1/messages/:msgId/export', async (c) => {
+  const message = await requireOwnedMessage(c, c.req.param('msgId'));
+  if (!message) return c.json({ error: 'Not found' }, 404);
+
+  const db = getSupabase(c.env);
+  const timeline = await getMessageTimeline(db, message.id);
+  const rows = ['occurred_at,kind,verdict,reason'];
+  for (const row of timeline) {
+    const reason = `"${row.reason.replace(/"/g, '""')}"`;
+    rows.push([row.occurred_at, row.kind, row.verdict, reason].join(','));
+  }
+  c.header('Content-Type', 'text/csv');
+  c.header('Content-Disposition', `attachment; filename="mailtrack-${message.id}.csv"`);
+  return c.body(rows.join('\n'));
+});
+
+eventsRoute.delete('/v1/messages/:msgId', async (c) => {
+  const db = getSupabase(c.env);
+  const deleted = await deleteMessage(db, c.req.param('msgId'), c.get('userId'));
+  if (!deleted) return c.json({ error: 'Not found' }, 404);
+  return c.json({ deleted: true });
+});
+
+// ADR-7 (see PLAN.md): a true server-push SSE stream needs a Durable Object
+// (or Supabase Realtime consumed directly by the extension) to hold a
+// connection open on Cloudflare's request/response model. Building a
+// half-working SSE endpoint here would violate "no half-finished
+// implementations," so v1 ships a short-interval poll instead; the
+// extension's background worker calls this every few seconds. Upgrading to
+// real push is tracked in PLAN.md Future Improvements.
+eventsRoute.get('/v1/events/poll', async (c) => {
+  const since = c.req.query('since');
+  const sinceDate = since ? new Date(since) : new Date(Date.now() - 60_000);
+  if (Number.isNaN(sinceDate.getTime())) {
+    return c.json({ error: 'since must be an ISO-8601 timestamp' }, 400);
+  }
+
+  const db = getSupabase(c.env);
+  const { data, error } = await db
+    .from('messages')
+    .select('id, status, status_updated_at')
+    .eq('user_id', c.get('userId'))
+    .gt('status_updated_at', sinceDate.toISOString())
+    .in('status', ['opened', 'clicked']);
+  if (error) return c.json({ error: 'Query failed' }, 500);
+
+  return c.json({
+    polledAt: new Date().toISOString(),
+    updates: (data ?? []).map((m) => ({ msgId: m.id, status: m.status, statusUpdatedAt: m.status_updated_at })),
+  });
+});
