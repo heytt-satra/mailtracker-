@@ -98,6 +98,7 @@ Base URL: `https://api.mailtrack.dev` (placeholder domain until purchased)
 |---|---|---|---|
 | POST | `/v1/auth/provision` | Exchange a Supabase session for a MailTrack API key (issues/rotates); see ADR-10 | Supabase access token |
 | POST | `/v1/messages` | Register a new tracked send; returns `{msgId, pixelToken, linkToken}` | API key (per-install) |
+| GET | `/v1/messages?offset=<n>` | Paginated list of the user's tracked messages (subject, status, sentAt) — backs the dashboard message list (M5) | API key, owner-scoped |
 | GET | `/p/:token.gif` | Tracking pixel. Always returns a 1x1 gif regardless of token validity (fail open, no errors leak state) | none (public) |
 | GET | `/l/:token` | Click redirect. 302 to original URL, logs click event | none (public) |
 | GET | `/v1/messages/:msgId/events` | Timeline of raw + classified events for a message | API key, owner-scoped |
@@ -113,7 +114,7 @@ All endpoints return JSON except `/p/*` (image/gif) and `/l/*` (302 redirect) an
 Canonical, executable source: [`db/migrations/0001_init.sql`](./db/migrations/0001_init.sql) — this section is a summary, not a duplicate; if they ever disagree, the migration file wins.
 
 - `users` — one row per signed-up account (v1 has no multi-seat orgs). `id references auth.users(id)` — the Supabase Auth user's own id, not a separate generated UUID (ADR-10). `api_key_hash` only, never plaintext.
-- `messages` — one row per tracked send. `status` is the escalate-only ladder value (`sent|delivered|opened|clicked|not_verifiable`), `pixel_token` is the unique 128-bit token embedded in the pixel URL.
+- `messages` — one row per tracked send. `status` is the escalate-only ladder value (`sent|delivered|opened|clicked|not_verifiable`), `pixel_token` is the unique 128-bit token embedded in the pixel URL, `subject` is plaintext (the sender's own subject line, shown back to the same sender in the dashboard — not a privacy concern, so not hashed; an earlier `subject_hash` column was dead code, never written or read).
 - `link_tokens` — one row per rewritten link in a message, maps `token → original_url`.
 - `raw_events` — every fetch/click, unfiltered, append-only. Carries `ip_hash` (never raw IP, NFR4), `asn` (from `request.cf.asn`, ADR-6), `ip_category` (resolved inline at log time via `classify_ip_category()`, ADR-8), and `classified_at` (null until the cron sweep processes it — lets the sweep cheaply select the pending queue).
 - `verdicts` — classified, append-only; this is what drives status changes and notifications. Carries a human-readable `reason` shown directly in the UI timeline.
@@ -128,7 +129,8 @@ Canonical, executable source: [`db/migrations/0001_init.sql`](./db/migrations/00
 - **Compose hook:** `sdk.Compose.registerComposeViewHandler` — see ADR-9 for the exact send-interception pattern (cancel-then-resend, not "modify and let it proceed"). On the first `presending`, calls `POST /v1/messages`, rewrites `<a href>` tags in the compose HTML to their tracked redirect URLs, appends the invisible pixel `<img>`, writes it back via `composeView.setBodyHTML()`, then calls `composeView.send()` itself.
 - **Thread view hook:** `sdk.Conversations.registerMessageViewHandlerAll` — for each rendered message, resolves its Gmail message ID (`messageView.getMessageIDAsync()`), looks it up against the local Gmail-ID→msgId map (populated from the compose hook's `sent` event, since the real Gmail ID isn't known until then), fetches current status, and renders `messageView.addAttachmentIcon({ iconUrl, tooltip })` — confirmed real API, not a guessed one.
 - **Background service worker:** `chrome.alarms` (1-minute floor, MV3 clamps `periodInMinutes`) calls `GET /v1/events/poll` (ADR-7 — polling, not SSE) and fires `chrome.notifications.create` only for `opened`/`clicked` upgrades in the response, which by construction (ADR-5) are always verified.
-- **Options page:** email+password signup/login (calls Supabase Auth directly with the public anon key, then exchanges the session for an API key via `POST /v1/auth/provision` — ADR-10) as the primary flow, with a collapsed "Advanced: enter an API key manually" fallback for troubleshooting. Once signed in: default-tracking toggle, notification toggle, sign-out, CSV export by message ID, delete-tracking-data by message ID (FR9/FR10). A full dashboard with a message list is M5, not v1.
+- **Options page:** email+password signup/login (calls Supabase Auth directly with the public anon key, then exchanges the session for an API key via `POST /v1/auth/provision` — ADR-10) as the primary flow, with a collapsed "Advanced: enter an API key manually" fallback for troubleshooting. Once signed in: default-tracking toggle, notification toggle, sign-out, a link to the dashboard, CSV export by message ID, delete-tracking-data by message ID (FR9/FR10).
+- **Dashboard page (M5):** a separate `dashboard.html` extension page (not embedded in options — a full list view needs the room). Paginated message list (`GET /v1/messages`, newest-first) with a status dot + subject + sent time per row; clicking a row expands an inline timeline (`GET /v1/messages/:msgId/events`) with suppressed/machine-classified events visibly greyed out rather than hidden (FR5), each showing its human-readable classifier reason. That reason string can contain attacker-influenceable content (e.g. a raw `User-Agent` header echoed into a `machine_suspect` reason) since it's rendered via `innerHTML` for inline formatting — escaped through a `textContent`-round-trip helper before interpolation, the one real XSS-relevant surface found on this page.
 - **Fail-open guarantee (NFR2):** `injectTrackingThenSend()` wraps the entire tracking attempt in try/catch/finally; `composeView.send()` is called in the `finally` block unconditionally, so a network failure, timeout, 4xx/5xx, or missing API key all fall through to an untracked send rather than blocking or losing the email.
 
 ## 9. Backend Architecture
@@ -178,25 +180,32 @@ mailtrack/
       package.json
       tsconfig.json
       vitest.config.ts
-    extension/              # implemented, M3 complete
+    extension/              # implemented, M3/M4/M5 complete
       entrypoints/
         background.ts        # MV3 service worker: chrome.alarms poll + notifications
         gmail.content.ts      # content script entry, matches mail.google.com
         options/
           index.html
-          main.ts              # settings, CSV export, delete-my-data
+          main.ts              # signup/login, settings, CSV export, delete-my-data
+        dashboard/
+          index.html
+          main.ts               # M5: message list + expandable per-message timeline
       src/
         inboxsdk-app.ts        # InboxSDK wiring: compose hook + status chips
         inboxsdk-types.ts       # hand-declared InboxSDK surface (see ADR-9)
         html-injection.ts        # pure pixel/link injection string transforms
-        api-client.ts             # fetch wrapper, Bearer auth, timeouts
-        storage.ts                 # chrome.storage.local typed wrapper
-        status-chip.ts              # status -> tooltip/color/icon (pure)
-        config.ts                    # API base URL, InboxSDK App ID, timeouts
+        dashboard-format.ts       # pure date/subject formatting for the dashboard (M5)
+        api-client.ts               # fetch wrapper, Bearer auth, timeouts
+        auth.ts                      # Supabase signUp/signInWithPassword wrappers (ADR-10)
+        supabase-client.ts             # lazily-created Supabase Auth client
+        storage.ts                      # chrome.storage.local typed wrapper
+        status-chip.ts                   # status -> tooltip/color/icon (pure)
+        config.ts                         # API base URL, InboxSDK App ID, Supabase config, timeouts
       public/
         icon-16/32/48/128.png        # placeholder 1x1 PNGs, real design deferred (M7)
       tests/
-        html-injection.test.ts, status-chip.test.ts, api-client.test.ts, storage.test.ts
+        html-injection.test.ts, status-chip.test.ts, api-client.test.ts, storage.test.ts,
+        auth.test.ts, dashboard-format.test.ts
       wxt.config.ts
       package.json
   packages/
@@ -215,7 +224,7 @@ mailtrack/
 - **M2 — Classifier v1:** timing filter, UA fingerprint, ASN filter, IP-range filter, escalation ladder, unit tests against fixtures. **Code complete 2026-07-08** (22/22 tests passing incl. all 6 permanent regression fixtures). Tuning against real-device data still pending deployment.
 - **M3 — Extension Phase 2:** WXT scaffold, InboxSDK compose hook, pixel/link injection, sent-status chip. **Code complete 2026-07-08** (20/20 unit tests passing, `wxt build` produces a valid MV3 bundle). Not yet smoke-tested in real Gmail — blocked on registering a real InboxSDK App ID (free, 2 minutes, but requires a human with a Google account to do the registration step) and on a deployed backend to point it at.
 - **M4 — Notification loop:** poll-based background worker (ADR-7), desktop notifications — **code complete alongside M3**. The mandatory phone acceptance test itself still requires a live device + deployed backend, tracked separately.
-- **M5 — Dashboard/detail view + CSV export + delete-my-data.** CSV export and delete-my-data shipped early as part of the M3 options page (simple form-based UI); the full message-list dashboard remains open.
+- **M5 — Dashboard/detail view + CSV export + delete-my-data.** **Done 2026-07-08.** Message list (`GET /v1/messages`, paginated) + expandable per-message timeline (FR5: suppressed/machine events visibly greyed out, not hidden) shipped as a new `dashboard.html` extension page, reachable from the options page. CSV export and delete-my-data were already covered by the M3 options page.
 - **M6 — Hardening:** security review, rate limiting, CORS lockdown **done 2026-07-08**. Performance benchmarks and dependency-audit remediation remain, both meaningfully blocked on a live deployment to benchmark against / a pre-release timing choice for `npm audit fix`.
 - **M7 — Release:** Chrome Web Store listing, README, docs complete.
 
@@ -244,7 +253,10 @@ mailtrack/
 - [x] Extension: sent-status chip (`addAttachmentIcon`, confirmed real API)
 - [x] Extension: background notification worker (chrome.alarms poll, ADR-7)
 - [x] Extension: options page (settings, CSV export, delete-my-data)
-- [x] Extension: unit tests — 26 tests passing (html-injection, status-chip, api-client, storage, auth)
+- [x] Extension: unit tests — 31 tests passing (html-injection, status-chip, api-client, storage, auth, dashboard-format)
+- [x] Backend: `GET /v1/messages` paginated list endpoint
+- [x] Fixed a dead schema field: `messages.subject_hash` was never written or read anywhere in the codebase, and being a one-way hash could never have been displayed back to the user regardless — replaced with plaintext `subject` (the sender's own words, shown back to the same sender, no privacy concern) which the dashboard actually needs
+- [x] Extension: dashboard page — message list + expandable per-message timeline, suppressed/machine events visibly greyed out (FR5), reachable from the options page ("Open dashboard →")
 - [x] Self-serve signup/login (email+password via Supabase Auth, ADR-10) — replaces the earlier "manually insert a DB row" onboarding with a real account-creation flow. Google OAuth sign-in is a fast-follow (needs a Google Cloud OAuth client, tracked in Known Issues).
 - [x] Backend: `POST /v1/auth/provision` — validates a Supabase session and issues/rotates a MailTrack API key
 - [ ] Extension: register a real InboxSDK App ID at register.inboxsdk.com — currently a loud placeholder in `src/config.ts` (see Known Issues)
@@ -268,7 +280,7 @@ mailtrack/
 - [x] IP addresses hashed at rest; raw IP never written to `raw_events` unhashed (`ip_hash` column, raw IP only touched transiently in the pixel/click handler to derive `ip_category` and the hash).
 - [x] Pixel/click/message-creation endpoints rate-limited via Cloudflare's native Rate Limiting binding (declarative in `wrangler.toml`, no external KV namespace to provision — verified real syntax before writing it). Pixel/click are keyed by requester IP and fail soft (skip logging, never change the response the requester sees — consistent with the fail-open/no-validity-leak design elsewhere); message creation is keyed by user and returns a normal 429, bounding a leaked API key's blast radius to 30 sends/minute.
 - [x] CORS locked to `ALLOWED_EXTENSION_ORIGIN` for all `/v1/*` routes via `hono/cors`, applied per-request (env bindings aren't available at module scope in Workers). Falls back to permissive `*` until the real `chrome-extension://<id>` is known post-publish (Known Issues) — a loud, documented placeholder rather than either a hardcoded guess or a silent no-op.
-- [ ] No user-supplied data reflected unescaped (XSS) in any dashboard view. N/A yet — no dashboard UI built (M5). Options page (M3) uses `textContent`/`.value` only, never `innerHTML` with server data — verified by inspection.
+- [x] No user-supplied data reflected unescaped (XSS) in any dashboard view. Options page (M3) uses `textContent`/`.value` only, never `innerHTML` with server data. Dashboard page (M5) does use `innerHTML` for inline event formatting — its one field that can carry attacker-influenceable content (`event.reason`, which can embed a raw `User-Agent` header) is passed through an `escapeHtml()` helper (round-trips via `textContent`) before interpolation; the other interpolated fields (`kindLabel`, `event.verdict`) come from closed backend enums, not free text, so they don't need escaping.
 - [x] Redirect endpoint only ever redirects to `original_url` looked up server-side by token; there is no client-supplied URL parameter, so open-redirect via tampering is structurally not possible.
 - [x] Extension API key stored in `chrome.storage.local` (extension-private storage, not accessible to Gmail's own page scripts) rather than `localStorage`, which the content script's page-world execution could expose to Gmail's page context.
 - [ ] Dependency audit clean before release. `npm audit` reports 18 vulnerabilities (7 moderate/7 high/4 critical) across `wrangler` and `wxt`'s transitive dev/build dependencies — not in shipped runtime or bundled extension code (confirmed via `wxt build` output inspection: bundled content script only pulls in `@inboxsdk/core` and our own source). Deferred to before M7 release; re-audit then since both tools ship frequent patches.
@@ -375,3 +387,9 @@ Two tiers: a manual live-device test that is the ultimate source of truth, and a
 - Rebuilt the options page: signup/login (email+password) is now the primary flow, with the old manual API-key-paste field demoted to a collapsed "Advanced" fallback rather than deleted outright — troubleshooting and pre-OAuth power users still have an escape hatch.
 - Added 8 new tests (4 for the pure `mapAuthResponse` mapping in `auth.ts`, 2 for the new `provisionApiKey` client call, plus updated the storage default-settings assertion for the new `accountEmail` field) — extension suite now 26/26, backend still 27/27 (untouched by this change). `tsc --noEmit` and `wxt build` both clean.
 - Updated the README's deploy runbook to reflect real signup (no more "manually insert a row and compute a SHA-256 hash by hand" instructions) and added `SUPABASE_ANON_KEY` to the secrets list.
+- Loop resumed with no new user input, returned to the previously-flagged unblocked work: M5, the dashboard. Before building it, caught a real design flaw while thinking through what a message list actually needs to display: `messages.subject_hash` had been in the schema since Phase 1 but was never written or read anywhere in the codebase — and being a one-way hash, it could never have served a dashboard's need to show the user their own subject lines back to them even if it HAD been populated. Grepped the whole repo to confirm zero usage before touching it, then replaced it with a plaintext `subject` column — no privacy issue, since it's the sender's own words shown back to the same sender, not exposed to any third party.
+- Verified `ComposeView.getSubject()` is a real InboxSDK method (same doc-verification discipline as the compose hook and status chips) before wiring it into the tracking payload.
+- Built `GET /v1/messages` (paginated, newest-first) on the backend and a new `dashboard.html` extension page: a message list with status/subject/sent-time, where clicking a row expands an inline timeline showing every classified event, suppressed (machine-classified) events visibly greyed out with their reason rather than hidden — this is FR5 actually shipping, not just documented as a requirement.
+- Caught one real security-relevant detail while building the dashboard: the timeline's `reason` field is generated by the backend classifier but can embed attacker-influenceable content (e.g. `rules.ts` interpolates the raw `User-Agent` header into a `machine_suspect` reason string) — that field is rendered via `innerHTML` for inline formatting, so it went through an `escapeHtml()` round-trip before interpolation. The other interpolated fields come from closed backend enums (verdict, event kind), not free text, so they're safe without escaping.
+- Verified WXT's actual output filenames (`wxt build` → `dashboard.html` at the bundle root, not `dashboard/index.html`) before writing the cross-page link from options to dashboard, rather than assuming the entrypoint folder structure carries through to the build output — it doesn't, WXT flattens it.
+- Added 4 new pure-logic tests for `dashboard-format.ts` (date formatting, subject truncation) — extension suite now 31/31, backend still 27/27. `tsc --noEmit` and `wxt build` clean on both.
