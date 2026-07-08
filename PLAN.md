@@ -87,6 +87,7 @@ Gmail (web) ── Chrome Extension (MV3, WXT, InboxSDK) ── HTTPS ──▶ 
 - **ADR-6: ASN resolved from `request.cf.asn`, not a MaxMind mmdb lookup.** Cloudflare already resolves the requesting IP's ASN at the edge and exposes it on `request.cf.asn`/`asOrganization` for free — no GeoIP database needed in the hot path. This changes MaxMind's role from "resolve IP→ASN" (original plan) to "help build the `asn_intel` category mapping" (asn→apple_mpp/security_scanner/...), which is a strictly smaller and simpler job. Discovered during Phase 1 implementation; adopted because it removes an entire dependency (mmdb parsing in a Worker) for equivalent accuracy.
 - **ADR-7: Polling over SSE for `/v1/events/*`.** True server-push on Cloudflare Workers needs a Durable Object to hold a connection open; without one, an SSE endpoint would be a half-working long-poll wearing an SSE label. Rather than ship that, v1 exposes `GET /v1/events/poll?since=<iso>` and the extension's background worker polls it every few seconds. Real push (Durable Objects, or Supabase Realtime consumed directly by the extension) is tracked in Future Improvements, not silently deferred.
 - **ADR-8: Apple Mail Privacy Protection is detected by IP-range containment, not ASN.** Apple Private Relay's second hop can egress through third-party CDN partner ASNs, not just Apple's own — so an ASN→apple_mpp mapping risks misclassifying unrelated traffic that happens to share an ASN with a CDN partner (a false "not verifiable" for a real human, or worse, silently swallowed opens). Apple publishes an authoritative CSV of egress ranges at `mask-api.icloud.com/egress-ip-ranges.csv` (verified reachable during Phase 1 — response exceeds 10MB, consistent with a real, large, current range list). MailTrack stores these in a Postgres `ip_ranges` table and resolves membership via the native `inet <<= cidr` containment operator through a `classify_ip_category()` SQL function, checked before the ASN-based path in the classifier. `asn_intel` remains correct for security scanners, which do run dedicated ASNs.
+- **ADR-9: Compose interception uses cancel-then-resend, not "modify in place."** InboxSDK's `presending` event is documented as firing "when the user presses send" with a `cancel()` escape hatch, but is NOT documented to await an async handler before the send proceeds — confirmed by direct research against the InboxSDK docs during Phase 2 (no documented promise/resume support). Modifying the compose body asynchronously inside an unawaited `presending` handler risks a race where Gmail's actual send fires before `setBodyHTML()` has run, shipping the email without the pixel. MailTrack instead calls `event.cancel()` synchronously on first `presending`, performs the tracking injection (or fails open) asynchronously, and then calls `composeView.send()` itself in a `finally` block — with a guard flag so a possible re-fired `presending` from that programmatic resend is a no-op pass-through rather than a second cancel (avoiding an infinite loop, undocumented either way). Also hand-declared the used InboxSDK surface in `inboxsdk-types.ts` rather than trusting `@inboxsdk/core`'s shipped types, which are inconsistent across published versions.
 
 ## 6. API Design
 
@@ -120,13 +121,13 @@ Canonical, executable source: [`db/migrations/0001_init.sql`](./db/migrations/00
 
 ## 8. Chrome Extension Architecture
 
-- **Framework:** WXT (Vite-based MV3 tooling) + TypeScript.
-- **Gmail integration:** InboxSDK, loaded via content script into Gmail's page.
-- **Compose hook:** `InboxSDK.Compose.registerComposeViewHandler` — adds a tracking toggle button; on send, calls backend `POST /v1/messages`, injects pixel `<img>` + rewrites `<a href>` tags in the compose body before InboxSDK's `send` event finalizes.
-- **Thread view hook:** `InboxSDK.Conversations` — injects a status chip (Sent/Delivered/Opened/Clicked/Not verifiable) next to tracked messages in the Sent view.
-- **Background service worker:** polls `/v1/events/stream` (SSE) or falls back to short-interval polling; on a `verified_open` or `verified_click` verdict, fires `chrome.notifications.create`.
-- **Options page:** default tracking on/off, notification preferences, API key / account, CSV export, "delete my data."
-- **Fail-open guarantee:** if the backend call in the compose hook fails or times out (>1.5s), the extension lets the email send untracked rather than blocking send (NFR2).
+- **Framework:** WXT (Vite-based MV3 tooling) + TypeScript. Builds cleanly (`wxt build`) into a valid MV3 bundle — verified during Phase 2 implementation.
+- **Gmail integration:** `@inboxsdk/core`, loaded from the `gmail.content.ts` content script (matches `https://mail.google.com/*`).
+- **Compose hook:** `sdk.Compose.registerComposeViewHandler` — see ADR-9 for the exact send-interception pattern (cancel-then-resend, not "modify and let it proceed"). On the first `presending`, calls `POST /v1/messages`, rewrites `<a href>` tags in the compose HTML to their tracked redirect URLs, appends the invisible pixel `<img>`, writes it back via `composeView.setBodyHTML()`, then calls `composeView.send()` itself.
+- **Thread view hook:** `sdk.Conversations.registerMessageViewHandlerAll` — for each rendered message, resolves its Gmail message ID (`messageView.getMessageIDAsync()`), looks it up against the local Gmail-ID→msgId map (populated from the compose hook's `sent` event, since the real Gmail ID isn't known until then), fetches current status, and renders `messageView.addAttachmentIcon({ iconUrl, tooltip })` — confirmed real API, not a guessed one.
+- **Background service worker:** `chrome.alarms` (1-minute floor, MV3 clamps `periodInMinutes`) calls `GET /v1/events/poll` (ADR-7 — polling, not SSE) and fires `chrome.notifications.create` only for `opened`/`clicked` upgrades in the response, which by construction (ADR-5) are always verified.
+- **Options page:** API key, default-tracking toggle, notification toggle, CSV export by message ID, delete-tracking-data by message ID (FR9/FR10). A full dashboard with a message list is M5, not v1.
+- **Fail-open guarantee (NFR2):** `injectTrackingThenSend()` wraps the entire tracking attempt in try/catch/finally; `composeView.send()` is called in the `finally` block unconditionally, so a network failure, timeout, 4xx/5xx, or missing API key all fall through to an untracked send rather than blocking or losing the email.
 
 ## 9. Backend Architecture
 
@@ -175,7 +176,27 @@ mailtrack/
       package.json
       tsconfig.json
       vitest.config.ts
-    extension/              # not yet started — Phase 2 (M3)
+    extension/              # implemented, M3 complete
+      entrypoints/
+        background.ts        # MV3 service worker: chrome.alarms poll + notifications
+        gmail.content.ts      # content script entry, matches mail.google.com
+        options/
+          index.html
+          main.ts              # settings, CSV export, delete-my-data
+      src/
+        inboxsdk-app.ts        # InboxSDK wiring: compose hook + status chips
+        inboxsdk-types.ts       # hand-declared InboxSDK surface (see ADR-9)
+        html-injection.ts        # pure pixel/link injection string transforms
+        api-client.ts             # fetch wrapper, Bearer auth, timeouts
+        storage.ts                 # chrome.storage.local typed wrapper
+        status-chip.ts              # status -> tooltip/color/icon (pure)
+        config.ts                    # API base URL, InboxSDK App ID, timeouts
+      public/
+        icon-16/32/48/128.png        # placeholder 1x1 PNGs, real design deferred (M7)
+      tests/
+        html-injection.test.ts, status-chip.test.ts, api-client.test.ts, storage.test.ts
+      wxt.config.ts
+      package.json
   packages/
     shared/
       src/
@@ -190,9 +211,9 @@ mailtrack/
 - **M0 — Planning (this doc).** Done 2026-07-08.
 - **M1 — Backend Phase 1:** pixel/click/messages endpoints, raw event logging, DB schema, unit tests. **Code complete 2026-07-08.** Not yet deployed (no Supabase/Cloudflare credentials) — see Known Issues.
 - **M2 — Classifier v1:** timing filter, UA fingerprint, ASN filter, IP-range filter, escalation ladder, unit tests against fixtures. **Code complete 2026-07-08** (22/22 tests passing incl. all 6 permanent regression fixtures). Tuning against real-device data still pending deployment.
-- **M3 — Extension Phase 2:** WXT scaffold, InboxSDK compose hook, pixel/link injection, sent-status chip.
-- **M4 — Notification loop:** SSE/poll background worker, desktop notifications, the mandatory phone acceptance test passing on a real device.
-- **M5 — Dashboard/detail view + CSV export + delete-my-data.**
+- **M3 — Extension Phase 2:** WXT scaffold, InboxSDK compose hook, pixel/link injection, sent-status chip. **Code complete 2026-07-08** (20/20 unit tests passing, `wxt build` produces a valid MV3 bundle). Not yet smoke-tested in real Gmail — blocked on registering a real InboxSDK App ID (free, 2 minutes, but requires a human with a Google account to do the registration step) and on a deployed backend to point it at.
+- **M4 — Notification loop:** poll-based background worker (ADR-7), desktop notifications — **code complete alongside M3**. The mandatory phone acceptance test itself still requires a live device + deployed backend, tracked separately.
+- **M5 — Dashboard/detail view + CSV export + delete-my-data.** CSV export and delete-my-data shipped early as part of the M3 options page (simple form-based UI); the full message-list dashboard remains open.
 - **M6 — Hardening:** security review, performance benchmarks, ASN refresh cron, rate limiting.
 - **M7 — Release:** Chrome Web Store listing, README, docs complete.
 
@@ -216,11 +237,16 @@ mailtrack/
 - [x] Classifier: unit tests — 22 tests passing, including all 6 permanent regression fixtures from section 15
 - [ ] Classifier: tuning pass against real-device fixtures (needs a deployed backend + real sends, blocked on credentials)
 - [ ] Backend: integration tests against a live Supabase instance (blocked on credentials)
-- [ ] Extension: WXT scaffold
-- [ ] Extension: InboxSDK compose hook + pixel/link injection
-- [ ] Extension: sent-status chip
-- [ ] Extension: background notification worker
-- [ ] Regression test: phone acceptance test automated
+- [x] Extension: WXT scaffold (`wxt build` produces a valid MV3 bundle — verified)
+- [x] Extension: InboxSDK compose hook + pixel/link injection (cancel-then-resend pattern, ADR-9)
+- [x] Extension: sent-status chip (`addAttachmentIcon`, confirmed real API)
+- [x] Extension: background notification worker (chrome.alarms poll, ADR-7)
+- [x] Extension: options page (settings, CSV export, delete-my-data)
+- [x] Extension: unit tests — 20 tests passing (html-injection, status-chip, api-client, storage)
+- [ ] Extension: register a real InboxSDK App ID at register.inboxsdk.com — currently a loud placeholder in `src/config.ts` (see Known Issues)
+- [ ] Extension: real icon/branding design — currently placeholder 1x1 PNGs (M7)
+- [ ] Extension: load unpacked in real Chrome + Gmail account for manual smoke test (blocked on a real InboxSDK App ID)
+- [ ] Regression test: phone acceptance test automated (blocked on deployment)
 - [ ] Security review
 - [ ] Performance benchmark (p95 < 100ms)
 - [ ] Chrome Web Store listing
@@ -237,10 +263,11 @@ mailtrack/
 - [x] API keys are stored hashed (never plaintext) — matches `users.api_key_hash`, SHA-256 via Web Crypto.
 - [x] IP addresses hashed at rest; raw IP never written to `raw_events` unhashed (`ip_hash` column, raw IP only touched transiently in the pixel/click handler to derive `ip_category` and the hash).
 - [ ] Pixel/click endpoints rate-limited per token to prevent enumeration/abuse. **Not yet implemented** — needs Cloudflare rate limiting rules or a Worker-side token-bucket in KV; tracked for M6.
-- [ ] CORS locked to the extension's origin for authenticated endpoints. **Not yet implemented** — needs the actual extension ID, which doesn't exist until the extension is published/loaded unpacked; tracked for M3.
-- [ ] No user-supplied data reflected unescaped (XSS) in any dashboard view. N/A yet — no dashboard UI built (M5).
+- [ ] CORS locked to the extension's origin for authenticated endpoints. **Not yet implemented** — needs the actual extension ID, which is only assigned once loaded unpacked/published; the extension itself now exists (M3 done) so this is unblocked, tracked for M6.
+- [ ] No user-supplied data reflected unescaped (XSS) in any dashboard view. N/A yet — no dashboard UI built (M5). Options page (M3) uses `textContent`/`.value` only, never `innerHTML` with server data — verified by inspection.
 - [x] Redirect endpoint only ever redirects to `original_url` looked up server-side by token; there is no client-supplied URL parameter, so open-redirect via tampering is structurally not possible.
-- [ ] Dependency audit clean before release. `npm audit` currently reports 9 vulnerabilities (5 moderate/3 high/1 critical) in `wrangler`'s transitive dev dependencies — not in shipped runtime code. Deferred to before M7 release; re-audit then since `wrangler` ships frequent patches.
+- [x] Extension API key stored in `chrome.storage.local` (extension-private storage, not accessible to Gmail's own page scripts) rather than `localStorage`, which the content script's page-world execution could expose to Gmail's page context.
+- [ ] Dependency audit clean before release. `npm audit` reports 18 vulnerabilities (7 moderate/7 high/4 critical) across `wrangler` and `wxt`'s transitive dev/build dependencies — not in shipped runtime or bundled extension code (confirmed via `wxt build` output inspection: bundled content script only pulls in `@inboxsdk/core` and our own source). Deferred to before M7 release; re-audit then since both tools ship frequent patches.
 - [x] Secrets (Supabase keys, MaxMind license) referenced only via `Env` bindings / `wrangler secret put`, never present in any committed file — verified via `.gitignore` (`.env*`) and `wrangler.toml` containing only non-secret `[vars]`.
 
 ## 14. Testing Strategy
@@ -269,11 +296,16 @@ Two tiers: a manual live-device test that is the ultimate source of truth, and a
 - **MaxMind GeoLite2-ASN integration deferred, not implemented.** The original plan used MaxMind to resolve IP→ASN; ADR-6 made that unnecessary (Cloudflare gives ASN for free via `request.cf.asn`). MaxMind's remaining potential use — bulk-sourcing the `asn_intel` security-scanner category mapping — needs the GeoLite2-ASN-CSV feed, which ships as a `.zip` requiring a zip-parsing dependency not yet added. Scanner ASN rows must currently be entered manually from verified vendor documentation via `upsertAsnIntel()`; shipping guessed ASN numbers was rejected as too risky (a wrong number silently suppresses real opens — the exact failure this product exists to prevent). `MAXMIND_LICENSE_KEY` remains in `Env` for when this is built out.
 - **Apple egress-range endpoint verified reachable but not yet ingested into a real database** (no Supabase project to upsert into yet). `refreshAppleRelayRanges()` is implemented and will run on first successful cron trigger once deployed.
 - **No `gh` CLI available in this environment** — GitHub operations use `git` directly over HTTPS with the credential manager already configured on this machine.
+- **InboxSDK App ID not registered.** `apps/extension/src/config.ts::INBOXSDK_APP_ID` is a loud placeholder string (`REPLACE_WITH_REGISTERED_INBOXSDK_APP_ID`), not a working credential. Registration at register.inboxsdk.com is free and fast but requires a human with a Google account to complete — it's an account-creation step, not something to fabricate. The extension will fail to load its Gmail integration (logged to console, Gmail itself keeps working) until this is replaced. **This blocks:** any real-Gmail smoke test of the compose hook or status chips.
+- **Extension icon/branding is a placeholder.** `apps/extension/public/icon-*.png` are 1x1 solid-color PNGs, not real design assets — sufficient for `wxt build` to produce a valid manifest and for `chrome.notifications` to have a resolvable `iconUrl`, but not shippable. Real icon design is out of scope for an engineering iteration and tracked for M7.
+- **Extension has not been loaded into a real Chrome profile or tested against a live Gmail account.** `wxt build` producing a valid MV3 bundle and 20/20 unit tests passing are both real signals, but neither substitutes for an actual `chrome://extensions` load-unpacked + compose-and-send smoke test. Blocked on the InboxSDK App ID above and on a deployed backend to point `MAILTRACK_API_BASE_URL` at.
 
 ## 17. Technical Debt
 
-- `npm audit` reports 9 vulnerabilities (5 moderate, 3 high, 1 critical), all in `wrangler`'s transitive dev dependencies (not in shipped Worker code). Plan: re-audit and update `wrangler` immediately before M7 release rather than chasing upstream patches mid-development.
+- `npm audit` reports 18 vulnerabilities (7 moderate, 7 high, 4 critical) across `wrangler` and `wxt`'s transitive dev/build dependencies (not in shipped Worker or bundled extension code — spot-checked via `wxt build` output). Plan: re-audit and update both tools immediately before M7 release rather than chasing upstream patches mid-development.
 - `asn_intel` ships with zero seed rows (see Known Issues) — the security-scanner detection branch of the classifier is implemented and tested but has no real data to act on until rows are sourced. Not a code defect, but means M2's "tuning against real fixtures" milestone has a hard dependency on this being populated first.
+- `apps/extension/src/inboxsdk-types.ts` hand-declares only the InboxSDK surface currently used (ComposeView, MessageView, InboxSDKInstance subsets). If a future feature needs another InboxSDK method, its type must be added there too — there's no fallback to the package's own (unreliable) types by design (ADR-9), so this file needs deliberate upkeep rather than "it'll just work."
+- Content script bundle is ~1.05MB (mostly `@inboxsdk/core` itself) per `wxt build` output. Not yet a measured problem (Gmail's own JS payload is far larger), but worth a real load-time benchmark once there's a live Gmail smoke test to measure against, rather than assuming it's fine.
 
 ## 18. Release Checklist
 
@@ -309,4 +341,12 @@ Two tiers: a manual live-device test that is the ultimate source of truth, and a
 - Two other architecture corrections made and documented as ADRs rather than left as silent decisions: ADR-6 (Cloudflare's `request.cf.asn` replaces MaxMind for IP→ASN resolution — MaxMind's role shrinks to sourcing the scanner-ASN category list) and ADR-7 (polling endpoint instead of a half-working SSE stream, since real server push needs a Durable Object).
 - Deliberately did NOT seed `asn_intel` with guessed scanner ASN numbers — wrong numbers would silently suppress real opens, which is the exact failure mode this product exists to prevent. Documented as a blocker requiring verified vendor data.
 - Committed and pushed the M1/M2 backend milestone.
-- Next: Phase 2 — WXT extension scaffold, InboxSDK compose hook, pixel/link injection into Gmail sends.
+- Started Phase 2 (extension, M3/M4). Before writing the compose-hook integration — the piece the whole product depends on — researched InboxSDK's real documented API rather than building from memory: confirmed `InboxSDK.load(2, appId)`, `Compose.registerComposeViewHandler`, `ComposeView.getHTMLContent()/setBodyHTML()`, the `presending`/`sent` events, `Conversations.registerMessageViewHandlerAll`, `MessageView.getMessageIDAsync()/addAttachmentIcon()`.
+- That research surfaced a real correctness risk before writing the integration: InboxSDK's `presending` event is not documented to await an async handler, so doing the pixel/link injection asynchronously inside it risks Gmail sending before the modified body is written back. Adopted the cancel-then-resend pattern instead — `event.cancel()` synchronously, inject asynchronously (or fail open), then call `composeView.send()` ourselves — with a guard flag against a possible re-fired `presending` looping. Documented as ADR-9.
+- Also decided not to trust `@inboxsdk/core`'s shipped TypeScript types (inconsistent across published versions) and hand-declared the used surface in `inboxsdk-types.ts` instead — small, deliberate, and matches exactly what was verified against the docs.
+- Built the full extension: WXT+TS scaffold, npm-workspaces-linked `@mailtrack/shared` types, pure/testable `html-injection.ts` (link rewriting + pixel append, deliberately regex-based over DOMParser so it's unit-testable without jsdom) and `status-chip.ts` (status→tooltip/color, explicit non-blank copy for `not_verifiable` per FR7), a fail-open `api-client.ts` with AbortController-based timeouts, `chrome.storage.local`-backed settings/ID-mapping, the InboxSDK wiring itself, an MV3 background service worker (`chrome.alarms` poll, ADR-7), and a functional (if plain) options page for settings/CSV export/delete-my-data.
+- Generated placeholder 1x1 PNG icons (real design deferred to M7) so the manifest is valid and `chrome.notifications` has a resolvable icon.
+- Verified rather than assumed: `wxt prepare` (generates `.wxt/` types), `tsc --noEmit` (clean), `vitest run` (20/20 passing across 4 test files), and `wxt build` (produces a valid MV3 bundle — manifest, background.js, content script, options.html, icons all present, 1.07MB total). Caught and fixed one test bug of my own along the way (an assertion regex that matched its own "not yet verified" copy).
+- Added `.wxt/` (WXT's generated-types directory) to `.gitignore` after noticing `git add` was about to pick it up as if it were source — it's regenerated by `wxt prepare`/`dev`/`build` and would go stale if committed.
+- Committed and pushed the M3/M4 extension milestone. Real-Gmail smoke testing remains blocked on registering a free InboxSDK App ID (an account-creation step for a human, not something to fabricate) and on a deployed backend — both logged in Known Issues, not silently skipped.
+- Next: M5 (dashboard beyond the options-page stopgap), M6 hardening (rate limiting, CORS lockdown now that a real extension ID will exist, dependency audit), or continue toward getting real Cloudflare/Supabase credentials so the backend can actually be deployed and the mandatory live-device acceptance test can finally run.
