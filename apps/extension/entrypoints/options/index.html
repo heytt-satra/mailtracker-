@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MailTrack settings</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 520px; margin: 2rem auto; color: #202124; }
+      h1 { font-size: 1.25rem; }
+      section { margin-bottom: 1.75rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e0e0e0; }
+      label { display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.9rem; }
+      input[type="text"], input[type="password"] { width: 100%; padding: 0.5rem; box-sizing: border-box; margin-bottom: 0.75rem; }
+      .toggle-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+      button { padding: 0.5rem 1rem; cursor: pointer; }
+      #status { font-size: 0.85rem; color: #188038; min-height: 1.2em; }
+      .hint { font-size: 0.8rem; color: #5f6368; margin-top: -0.5rem; margin-bottom: 0.75rem; }
+    </style>
+  </head>
+  <body>
+    <h1>MailTrack</h1>
+
+    <section>
+      <label for="apiKey">API key</label>
+      <input type="password" id="apiKey" placeholder="Paste your MailTrack API key" />
+      <div class="toggle-row"><input type="checkbox" id="trackingEnabled" /><label for="trackingEnabled" style="margin:0">Track new emails by default</label></div>
+      <div class="toggle-row"><input type="checkbox" id="notificationsEnabled" /><label for="notificationsEnabled" style="margin:0">Notify me on verified opens and clicks</label></div>
+      <button id="save">Save</button>
+      <div id="status"></div>
+    </section>
+
+    <section>
+      <label for="exportMsgId">Export a message's event timeline (CSV)</label>
+      <input type="text" id="exportMsgId" placeholder="Message ID" />
+      <button id="export">Download CSV</button>
+    </section>
+
+    <section>
+      <label for="deleteMsgId">Delete tracking data for a message</label>
+      <input type="text" id="deleteMsgId" placeholder="Message ID" />
+      <button id="delete">Delete</button>
+      <div class="hint">Removes all raw events and verdicts for this message. Cannot be undone.</div>
+    </section>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
