@@ -62,15 +62,46 @@ const MESSAGE_COLUMNS = 'id, user_id, pixel_token, sent_at, status, status_updat
 
 export async function insertMessage(
   db: SupabaseClient,
-  params: { userId: string; gmailMessageId?: string; pixelToken: string },
+  params: { userId: string; gmailMessageId?: string; subject?: string; pixelToken: string },
 ): Promise<MessageRow> {
   const { data, error } = await db
     .from('messages')
-    .insert({ user_id: params.userId, gmail_message_id: params.gmailMessageId ?? null, pixel_token: params.pixelToken })
+    .insert({
+      user_id: params.userId,
+      gmail_message_id: params.gmailMessageId ?? null,
+      subject: params.subject ?? null,
+      pixel_token: params.pixelToken,
+    })
     .select(MESSAGE_COLUMNS)
     .single();
   if (error) throw error;
   return data;
+}
+
+export interface MessageSummaryRow {
+  id: string;
+  subject: string | null;
+  status: MessageStatus;
+  sent_at: string;
+}
+
+const LIST_PAGE_SIZE = 50;
+
+/** Paginated, newest-first — backs GET /v1/messages (dashboard message list, M5). */
+export async function listMessagesForUser(
+  db: SupabaseClient,
+  userId: string,
+  offset: number,
+): Promise<{ rows: MessageSummaryRow[]; nextOffset: number | null }> {
+  const { data, error } = await db
+    .from('messages')
+    .select('id, subject, status, sent_at')
+    .eq('user_id', userId)
+    .order('sent_at', { ascending: false })
+    .range(offset, offset + LIST_PAGE_SIZE - 1);
+  if (error) throw error;
+  const rows = data ?? [];
+  return { rows, nextOffset: rows.length === LIST_PAGE_SIZE ? offset + LIST_PAGE_SIZE : null };
 }
 
 export async function insertLinkTokens(

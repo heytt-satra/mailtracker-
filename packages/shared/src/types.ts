@@ -49,6 +49,8 @@ export interface ClassificationResult {
 
 export interface CreateMessageRequest {
   gmailMessageId?: string;
+  /** Plaintext, shown back to the sender in the dashboard (M5) — see db/migrations/0001_init.sql comment on messages.subject. */
+  subject?: string;
   linkUrls: string[];
 }
 
@@ -71,4 +73,17 @@ export interface TimelineEvent {
   reason: string;
   /** suppressed events (machine_suspect) are shown greyed out in the UI, not hidden */
   suppressed: boolean;
+}
+
+/** One row in the dashboard's message list (M5). */
+export interface MessageSummary {
+  msgId: string;
+  subject: string | null;
+  status: MessageStatus;
+  sentAt: string;
+}
+
+export interface MessageListResponse {
+  messages: MessageSummary[];
+  nextOffset: number | null;
 }

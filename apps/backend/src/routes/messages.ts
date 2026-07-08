@@ -12,6 +12,11 @@ export const messagesRoute = new Hono<{ Bindings: Env; Variables: Variables }>()
 // unbounded batch insert, not a business rule.
 const MAX_LINK_URLS = 50;
 
+// Gmail itself doesn't hard-cap subject length, but nothing needs more than
+// this for a dashboard list row; truncating rather than rejecting keeps a
+// long subject from blocking an otherwise-normal send (NFR2 fail-open spirit).
+const MAX_SUBJECT_LENGTH = 500;
+
 messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
   // Bounds the blast radius of a leaked/compromised API key — 30 tracked
   // sends/minute is generous for a human composing email, well below what a
@@ -27,12 +32,13 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
     return c.json({ error: `linkUrls exceeds the maximum of ${MAX_LINK_URLS}` }, 400);
   }
   const validLinkUrls = body.linkUrls.filter(isTrackableUrl);
+  const subject = typeof body.subject === 'string' ? body.subject.trim().slice(0, MAX_SUBJECT_LENGTH) || undefined : undefined;
 
   const db = getSupabase(c.env);
   const userId = c.get('userId');
   const pixelToken = randomToken();
 
-  const message = await insertMessage(db, { userId, gmailMessageId: body.gmailMessageId, pixelToken });
+  const message = await insertMessage(db, { userId, gmailMessageId: body.gmailMessageId, subject, pixelToken });
 
   const linkTokens = validLinkUrls.map((originalUrl) => ({ token: randomToken(), originalUrl }));
   await insertLinkTokens(db, message.id, linkTokens);

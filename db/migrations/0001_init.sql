@@ -20,7 +20,14 @@ create table messages (
   user_id uuid not null references users(id) on delete cascade,
   gmail_message_id text,
   pixel_token text not null unique,
-  subject_hash text,
+  -- Plaintext, not hashed: this is the sender's own subject line, shown
+  -- back to the same sender in the dashboard message list (M5) — there is
+  -- no third party involved, so hashing would only make the field useless
+  -- (a hash can't be un-hashed to display). An earlier draft of this schema
+  -- stored subject_hash instead and it went completely unused — no code
+  -- ever wrote or read it — because a one-way hash can't serve the actual
+  -- product need. Capped at 500 chars at the API layer (routes/messages.ts).
+  subject text,
   sent_at timestamptz not null default now(),
   status text not null default 'sent'
     check (status in ('sent','delivered','opened','clicked','not_verifiable')),
