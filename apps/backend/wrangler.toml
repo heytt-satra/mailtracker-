@@ -15,3 +15,22 @@ ENVIRONMENT = "development"
 # Weekly ASN intelligence refresh (Apple MPP / scanner ranges) runs Monday 03:00 UTC.
 [triggers]
 crons = ["* * * * *", "0 3 * * 1"]
+
+# Cloudflare's native Rate Limiting binding — no external KV namespace to
+# provision, namespace_id is just a locally-unique integer we choose. Used to
+# cap abuse on the public pixel/click endpoints (keyed by requester IP) and
+# on message creation (keyed by user, to bound a leaked API key's blast
+# radius). See security-review notes in PLAN.md section 13.
+[[ratelimits]]
+name = "PUBLIC_RATE_LIMITER"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 60
+  period = 60
+
+[[ratelimits]]
+name = "MESSAGES_RATE_LIMITER"
+namespace_id = "1002"
+  [ratelimits.simple]
+  limit = 30
+  period = 60

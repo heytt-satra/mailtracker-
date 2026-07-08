@@ -20,12 +20,19 @@ clickRoute.get('/l/:token', async (c) => {
   }
 
   // Log in the background: the human is already mid-navigation, don't make
-  // them wait on our insert. A click is always verified_click regardless of
-  // how long logging takes (classifier rules.ts short-circuits on kind).
+  // them wait on our insert. Classification (including the scanner-click
+  // check, see ADR-9-adjacent rules.ts logic) happens later in the sweep,
+  // independent of how long logging takes.
   c.executionCtx.waitUntil(
     (async () => {
-      const { asn } = getRequestAsn(c.req.raw);
       const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
+      // Same soft rate-limit pattern as the pixel: never affects the
+      // redirect the human is already following, only whether this fetch
+      // gets logged for classification.
+      const { success } = await c.env.PUBLIC_RATE_LIMITER.limit({ key: ip });
+      if (!success) return;
+
+      const { asn } = getRequestAsn(c.req.raw);
       const ipCategory = await classifyIpCategory(db, ip).catch(() => null);
       await insertRawEvent(db, {
         messageId: link.messageId,

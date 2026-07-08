@@ -30,12 +30,20 @@ pixelRoute.get('/p/:token', async (c) => {
 
 async function logPixelFetch(env: Env, pixelToken: string, request: Request): Promise<void> {
   try {
+    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+    // Rate limit is checked here, in the background task, never on the
+    // response path — the pixel itself always returns 200 with the same
+    // bytes regardless (no validity leak, ADR from pixel.ts header comment).
+    // Exceeding the limit just means this fetch isn't logged; it does not
+    // change what the requester sees.
+    const { success } = await env.PUBLIC_RATE_LIMITER.limit({ key: ip });
+    if (!success) return;
+
     const db = getSupabase(env);
     const message = await getMessageByPixelToken(db, pixelToken);
     if (!message) return; // unknown/expired token: nothing to log, pixel already returned above
 
     const { asn } = getRequestAsn(request);
-    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
     const headers: Record<string, string> = {};
     for (const [key, value] of request.headers.entries()) {
       if (key.toLowerCase() === 'cookie' || key.toLowerCase() === 'authorization') continue; // never log credentials
