@@ -8,11 +8,19 @@
       h1 { font-size: 1.25rem; }
       section { margin-bottom: 1.75rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e0e0e0; }
       label { display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.9rem; }
-      input[type="text"], input[type="password"] { width: 100%; padding: 0.5rem; box-sizing: border-box; margin-bottom: 0.75rem; }
+      input[type="text"], input[type="password"], input[type="email"] { width: 100%; padding: 0.5rem; box-sizing: border-box; margin-bottom: 0.75rem; }
       .toggle-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+      .button-row { display: flex; gap: 0.5rem; }
       button { padding: 0.5rem 1rem; cursor: pointer; }
-      #status { font-size: 0.85rem; color: #188038; min-height: 1.2em; }
+      button.secondary { background: none; border: 1px solid #dadce0; }
+      #authStatus, #status { font-size: 0.85rem; color: #188038; min-height: 1.2em; }
+      #authStatus[data-error], #status[data-error] { color: #c5221f; }
       .hint { font-size: 0.8rem; color: #5f6368; margin-top: -0.5rem; margin-bottom: 0.75rem; }
+      details { margin-top: 0.5rem; }
+      summary { cursor: pointer; font-size: 0.85rem; color: #5f6368; }
+      #signedInPanel { display: none; }
+      #signedInPanel.visible { display: block; }
+      #signedOutPanel.hidden { display: none; }
     </style>
   </head>
   <body>
@@ -20,12 +28,36 @@
 
     <section aria-labelledby="account-heading">
       <h2 id="account-heading" style="font-size:1rem;margin:0 0 0.75rem">Account</h2>
-      <label for="apiKey">API key</label>
-      <input type="password" id="apiKey" placeholder="Paste your MailTrack API key" />
-      <div class="toggle-row"><input type="checkbox" id="trackingEnabled" /><label for="trackingEnabled" style="margin:0">Track new emails by default</label></div>
-      <div class="toggle-row"><input type="checkbox" id="notificationsEnabled" /><label for="notificationsEnabled" style="margin:0">Notify me on verified opens and clicks</label></div>
-      <button id="save">Save</button>
-      <div id="status" role="status" aria-live="polite"></div>
+
+      <div id="signedOutPanel">
+        <label for="email">Email</label>
+        <input type="email" id="email" autocomplete="email" />
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" minlength="6" />
+        <div class="button-row">
+          <button id="logIn">Log in</button>
+          <button id="signUp" class="secondary">Sign up</button>
+        </div>
+        <div id="authStatus" role="status" aria-live="polite"></div>
+
+        <details>
+          <summary>Advanced: enter an API key manually</summary>
+          <label for="apiKey" style="margin-top:0.75rem">API key</label>
+          <input type="password" id="apiKey" placeholder="Paste your MailTrack API key" />
+          <button id="saveApiKey" class="secondary">Use this key</button>
+        </details>
+      </div>
+
+      <div id="signedInPanel">
+        <p id="signedInEmail" style="margin:0 0 0.75rem"></p>
+        <div class="toggle-row"><input type="checkbox" id="trackingEnabled" /><label for="trackingEnabled" style="margin:0">Track new emails by default</label></div>
+        <div class="toggle-row"><input type="checkbox" id="notificationsEnabled" /><label for="notificationsEnabled" style="margin:0">Notify me on verified opens and clicks</label></div>
+        <div class="button-row">
+          <button id="save">Save preferences</button>
+          <button id="signOut" class="secondary">Sign out</button>
+        </div>
+        <div id="status" role="status" aria-live="polite"></div>
+      </div>
     </section>
 
     <section aria-labelledby="export-heading">
