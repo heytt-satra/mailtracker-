@@ -1,0 +1,67 @@
+import type { CreateMessageRequest, CreateMessageResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
+import { MAILTRACK_API_BASE_URL } from './config';
+
+export class MailTrackApiError extends Error {}
+
+async function request<T>(path: string, apiKey: string, init: RequestInit = {}, timeoutMs?: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetch(`${MAILTRACK_API_BASE_URL}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        ...init.headers,
+        Authorization: `Bearer ${apiKey}`,
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+    });
+    if (!response.ok) {
+      throw new MailTrackApiError(`MailTrack API ${path} returned ${response.status}`);
+    }
+    return (await response.json()) as T;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Called from the compose "presending" hook. NFR2 (fail-open): the caller is
+ * responsible for timing this out and letting the send proceed untracked —
+ * see COMPOSE_INJECTION_TIMEOUT_MS in config.ts and its usage in
+ * src/inboxsdk-app.ts. This function itself does not swallow errors; the
+ * caller decides what "fail open" means at the call site.
+ */
+export function createMessage(apiKey: string, body: CreateMessageRequest, timeoutMs: number): Promise<CreateMessageResponse> {
+  return request<CreateMessageResponse>('/v1/messages', apiKey, { method: 'POST', body: JSON.stringify(body) }, timeoutMs);
+}
+
+export function getMessageStatus(apiKey: string, msgId: string): Promise<MessageStatusResponse> {
+  return request<MessageStatusResponse>(`/v1/messages/${msgId}/status`, apiKey);
+}
+
+export function getMessageTimeline(apiKey: string, msgId: string): Promise<{ msgId: string; status: string; events: TimelineEvent[] }> {
+  return request(`/v1/messages/${msgId}/events`, apiKey);
+}
+
+export interface PollUpdate {
+  msgId: string;
+  status: 'opened' | 'clicked';
+  statusUpdatedAt: string;
+}
+
+export function pollEvents(apiKey: string, sinceIso: string): Promise<{ polledAt: string; updates: PollUpdate[] }> {
+  return request(`/v1/events/poll?since=${encodeURIComponent(sinceIso)}`, apiKey);
+}
+
+export async function exportMessageCsv(apiKey: string, msgId: string): Promise<string> {
+  const response = await fetch(`${MAILTRACK_API_BASE_URL}/v1/messages/${msgId}/export`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) throw new MailTrackApiError(`Export failed with ${response.status}`);
+  return response.text();
+}
+
+export function deleteMessage(apiKey: string, msgId: string): Promise<{ deleted: boolean }> {
+  return request(`/v1/messages/${msgId}`, apiKey, { method: 'DELETE' });
+}
