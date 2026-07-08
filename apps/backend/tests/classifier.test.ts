@@ -143,15 +143,41 @@ describe('regression: permanent fixtures (PLAN.md section 15)', () => {
     expect(nextStatus(statusAfterFirst, secondFetch.verdict)).toBe('opened');
   });
 
-  it('5. any link click escalates to clicked regardless of prior pixel verdicts', () => {
+  it('5. a link click from an Apple Private Relay egress still escalates to clicked', () => {
+    // Private Relay only proxies content the device actually requests — it
+    // does not auto-follow links in a message body — so unlike a pixel
+    // fetch, a click via this ASN is a normal human click.
     const clickResult = classifyEvent(
       baseInput({
         event: baseEvent({ kind: 'link_click', userAgent: null, fetchSequenceMs: 1_000 }),
-        asnIntel: APPLE_MPP, // even from a "suspect" ASN, a click is still a click
+        asnIntel: APPLE_MPP,
       }),
     );
     expect(clickResult.verdict).toBe('verified_click');
     expect(nextStatus('not_verifiable', clickResult.verdict)).toBe('clicked');
+  });
+
+  it('5b. a link click pre-visited by a security-scanner ASN does NOT escalate to clicked', () => {
+    // Microsoft Safe Links / Proofpoint URL Defense / Mimecast rewrite links
+    // and auto-visit them server-side to scan before the recipient ever
+    // opens the email — the click-side analog of the pixel prefetch problem.
+    const clickResult = classifyEvent(
+      baseInput({
+        event: baseEvent({ kind: 'link_click', userAgent: null, fetchSequenceMs: 500 }),
+        asnIntel: SCANNER_ASN,
+      }),
+    );
+    expect(clickResult.verdict).toBe('machine_suspect');
+    expect(nextStatus('delivered', clickResult.verdict)).toBe('delivered');
+  });
+
+  it('5c. a link click from a known scanner user-agent does NOT escalate to clicked', () => {
+    const clickResult = classifyEvent(
+      baseInput({
+        event: baseEvent({ kind: 'link_click', userAgent: 'Mimecast/1.0', fetchSequenceMs: 500 }),
+      }),
+    );
+    expect(clickResult.verdict).toBe('machine_suspect');
   });
 
   it('6. once opened, a later machine_suspect classification does not revert status', () => {

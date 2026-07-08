@@ -17,11 +17,28 @@ export const BURST_THRESHOLD = 5;
 export function classifyEvent(input: ClassificationInput): ClassificationResult {
   const { event, asnIntel, ipCategory, burstFetchCount, isFirstFetch } = input;
 
-  // A link click is always human-initiated: nothing about the click flow can
-  // be triggered by a passive prefetch/scan of the message body. This check
-  // is unconditional and short-circuits everything else (regression fixture 5).
+  const asnCategory = classifyAsn(asnIntel);
+  const uaClass = classifyUserAgent(event.userAgent);
+
+  // A link click usually IS a direct human action — but not always: several
+  // corporate security gateways (Microsoft Safe Links, Proofpoint URL
+  // Defense, Mimecast) rewrite links and then automatically pre-visit the
+  // rewritten URL server-side to scan it, before the recipient ever opens
+  // the email. That's the exact same false-positive shape as the pixel
+  // problem, applied to clicks — so link clicks get the same scanner check
+  // pixel fetches do. Apple Private Relay is deliberately NOT checked here
+  // (unlike for pixel_fetch): Private Relay only proxies content the user's
+  // own device actually requests, it does not auto-follow links in a
+  // message body, so a click via a Private Relay egress IP is a normal
+  // human click and should verify.
   if (event.kind === 'link_click') {
-    return { verdict: 'verified_click', reason: 'Link click is a direct user action, always verified.' };
+    if (asnCategory === 'security_scanner' || uaClass === 'known_scanner') {
+      return {
+        verdict: 'machine_suspect',
+        reason: `Link pre-visited from a known security-scanner ${asnCategory === 'security_scanner' ? 'ASN' : 'user-agent'} — a mail gateway scan, not the recipient clicking.`,
+      };
+    }
+    return { verdict: 'verified_click', reason: 'Link click with no scanner signal detected: a direct user action.' };
   }
 
   // IP-range match takes priority over ASN lookup for Apple MPP: relay
@@ -33,9 +50,6 @@ export function classifyEvent(input: ClassificationInput): ClassificationResult 
       reason: 'Fetched from a published Apple Private Relay egress range; opens cannot be verified for this recipient.',
     };
   }
-
-  const asnCategory = classifyAsn(asnIntel);
-  const uaClass = classifyUserAgent(event.userAgent);
 
   if (burstFetchCount >= BURST_THRESHOLD) {
     return {
