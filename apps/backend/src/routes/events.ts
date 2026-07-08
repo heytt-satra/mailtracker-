@@ -1,12 +1,29 @@
 import { Hono } from 'hono';
-import type { MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
+import type { MessageListResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
-import { deleteMessage, getMessageById, getMessageTimeline, getSupabase } from '../db/client';
+import { deleteMessage, getMessageById, getMessageTimeline, getSupabase, listMessagesForUser } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 
 export const eventsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+// Hono's /* wildcard requires a trailing segment, so it doesn't cover the
+// bare list path — both patterns are needed to guard every /v1/messages
+// route with auth.
+eventsRoute.use('/v1/messages', apiKeyAuth);
 eventsRoute.use('/v1/messages/*', apiKeyAuth);
+
+// Dashboard message list (M5). Paginated newest-first; `?offset=N` continues
+// from a prior `nextOffset`.
+eventsRoute.get('/v1/messages', async (c) => {
+  const offset = Number(c.req.query('offset') ?? '0');
+  const db = getSupabase(c.env);
+  const { rows, nextOffset } = await listMessagesForUser(db, c.get('userId'), Number.isFinite(offset) && offset >= 0 ? offset : 0);
+  const response: MessageListResponse = {
+    messages: rows.map((row) => ({ msgId: row.id, subject: row.subject, status: row.status, sentAt: row.sent_at })),
+    nextOffset,
+  };
+  return c.json(response);
+});
 
 async function requireOwnedMessage(c: { env: Env; get: (k: 'userId') => string }, msgId: string) {
   const db = getSupabase(c.env);
