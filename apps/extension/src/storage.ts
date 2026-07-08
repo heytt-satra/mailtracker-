@@ -2,12 +2,15 @@
 
 export interface MailTrackSettings {
   apiKey: string | null;
+  /** The email that was signed in when apiKey was provisioned — display-only, not used for auth. Null for a manually-pasted key (no signup flow). */
+  accountEmail: string | null;
   trackingEnabledByDefault: boolean;
   notificationsEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: MailTrackSettings = {
   apiKey: null,
+  accountEmail: null,
   trackingEnabledByDefault: true,
   notificationsEnabled: true,
 };

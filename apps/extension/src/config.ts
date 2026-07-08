@@ -11,6 +11,16 @@ export const MAILTRACK_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:87
 // is loud during development.
 export const INBOXSDK_APP_ID = 'REPLACE_WITH_REGISTERED_INBOXSDK_APP_ID';
 
+// Supabase project URL + anon key — both public-safe by Supabase's own
+// design (client apps are meant to embed the anon key; access is enforced
+// by RLS server-side, not by keeping this secret). Used ONLY for the
+// signup/login screen's direct Supabase Auth calls (ADR-10) — never for
+// direct table access, which always goes through the MailTrack API and its
+// own api-key auth. NOT YET SET — loud placeholders until a real Supabase
+// project exists (see PLAN.md Known Issues).
+export const SUPABASE_URL = 'REPLACE_WITH_SUPABASE_PROJECT_URL';
+export const SUPABASE_ANON_KEY = 'REPLACE_WITH_SUPABASE_ANON_KEY';
+
 // NFR2: tracking must never block or delay a send. If POST /v1/messages
 // hasn't resolved by this deadline, the compose hook lets the email send
 // untracked rather than waiting further.

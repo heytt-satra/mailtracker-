@@ -65,3 +65,19 @@ export async function exportMessageCsv(apiKey: string, msgId: string): Promise<s
 export function deleteMessage(apiKey: string, msgId: string): Promise<{ deleted: boolean }> {
   return request(`/v1/messages/${msgId}`, apiKey, { method: 'DELETE' });
 }
+
+/**
+ * Exchanges a Supabase access token (from signup/login, see src/auth.ts) for
+ * a MailTrack API key. Deliberately NOT built on `request()` above — that
+ * helper's `apiKey` param is our own long-lived credential, whereas this
+ * call's Bearer token is a short-lived Supabase session token, a different
+ * credential type used exactly once per signup/login.
+ */
+export async function provisionApiKey(supabaseAccessToken: string): Promise<{ apiKey: string; email: string | null }> {
+  const response = await fetch(`${MAILTRACK_API_BASE_URL}/v1/auth/provision`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${supabaseAccessToken}` },
+  });
+  if (!response.ok) throw new MailTrackApiError(`Provisioning failed with ${response.status}`);
+  return response.json();
+}
