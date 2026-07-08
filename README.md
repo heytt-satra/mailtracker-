@@ -29,7 +29,7 @@ Backend (M1/M2, plus M6 hardening) and extension (M3/M4, plus self-serve signup)
 ```bash
 npm install                                    # installs all three workspaces
 npm run test --workspace=apps/backend          # 27 tests
-npm run test --workspace=apps/extension        # 26 tests
+npm run test --workspace=apps/extension        # 31 tests
 npm run typecheck --workspace=apps/backend     # or cd into either app and run directly
 npm run typecheck --workspace=apps/extension
 cd apps/extension && npx wxt build             # produces .output/chrome-mv3, a loadable (if not yet InboxSDK/Supabase-functional) extension
@@ -55,6 +55,7 @@ cd apps/extension && npx wxt build             # produces .output/chrome-mv3, a 
 3. In Chrome, go to `chrome://extensions`, enable Developer Mode, "Load unpacked", select `apps/extension/.output/chrome-mv3`.
 4. Open the extension's options page (right-click its toolbar icon → Options). Sign up with an email + password — this calls Supabase Auth directly and exchanges the resulting session for a MailTrack API key automatically (ADR-10). No manual key handling needed; the "Advanced: enter an API key manually" fallback is there for troubleshooting only.
 5. Open Gmail, compose and send a test email — the compose hook should inject tracking transparently (fails open silently if anything's misconfigured; check the extension's service worker console via `chrome://extensions` → "service worker" link, and the content script console in Gmail's own devtools).
+6. Click "Open dashboard →" from the options page (signed-in view) to see your tracked messages — a list with status/subject/sent-time; click any row to expand its full event timeline, including suppressed/machine-classified fetches shown greyed out with the classifier's reasoning.
 
 ## Running the mandatory acceptance test
 
