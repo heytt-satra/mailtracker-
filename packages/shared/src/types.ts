@@ -20,6 +20,19 @@ export type Verdict = 'machine_suspect' | 'verified_open' | 'verified_click' | '
  */
 export type ReadConfidence = 'read' | 'likely_read' | 'glanced' | 'not_verifiable';
 
+/** Position of a Track B depth beacon within the compose body. 'top' is the original ADR-1 pixel; mid/bottom are ADR-19. */
+export type BeaconPosition = 'top' | 'mid' | 'bottom';
+
+/**
+ * How far into a long message a verified fetch reached, per ADR-19. Only
+ * meaningful for messages long enough to trigger Gmail's ~102KB "message
+ * clipped" truncation — for a normal short email, mid/bottom beacons are
+ * never even generated (see LONG_MESSAGE_BEACON_THRESHOLD_BYTES), so this
+ * stays null rather than implying a depth claim that isn't actually
+ * provable for a short, fully-visible message.
+ */
+export type DepthReached = 'mid' | 'bottom' | null;
+
 export interface RawFetchEvent {
   messageId: string;
   kind: EventKind;
@@ -68,12 +81,22 @@ export interface CreateMessageRequest {
   /** Plaintext "To" recipients, joined — the primary dashboard identifier (subject alone can't tell repeat sends apart). See db/migrations/0002_add_recipient.sql. */
   recipient?: string;
   linkUrls: string[];
+  /**
+   * Byte length of the composed HTML body, measured client-side before
+   * injection (`composeView.getHTMLContent().length`). Used only to decide
+   * whether this message is long enough to plausibly hit Gmail's clip
+   * threshold and therefore worth generating depth beacons for (ADR-19) —
+   * never stored or shown back to the sender.
+   */
+  bodyLength?: number;
 }
 
 export interface CreateMessageResponse {
   msgId: string;
   pixelUrl: string;
   linkMap: Record<string, string>; // originalUrl -> tracked redirect URL
+  /** Present only when bodyLength exceeded the long-message threshold (ADR-19) — absent means "don't bother injecting depth beacons." */
+  beaconUrls?: { mid: string; bottom: string };
 }
 
 export interface MessageStatusResponse {
@@ -115,6 +138,8 @@ export interface MessageSummary {
   minEngagedSeconds: number | null;
   /** Human-readable justification shown in the dashboard — the evidence IS the product (Track E, "never fabricate"). */
   readEvidence: string | null;
+  /** ADR-19. Only ever set for messages long enough to have generated depth beacons in the first place. */
+  depthReached: DepthReached;
 }
 
 export interface MessageListResponse {

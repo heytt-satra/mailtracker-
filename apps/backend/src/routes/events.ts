@@ -29,6 +29,7 @@ eventsRoute.get('/v1/messages', async (c) => {
         readConfidence: null,
         minEngagedSeconds: null,
         readEvidence: null,
+        depthReached: null,
       };
       return { msgId: row.id, subject: row.subject, recipient: row.recipient, status: row.status, sentAt: row.sent_at, ...rowStats };
     }),

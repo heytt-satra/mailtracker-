@@ -2,7 +2,7 @@ import * as InboxSDKLoader from '@inboxsdk/core';
 import { COMPOSE_INJECTION_TIMEOUT_MS, INBOXSDK_APP_ID } from './config';
 import { createMessage, getMessageStatus } from './api-client';
 import { getMsgIdForGmailMessage, getSettings, recordGmailMessageId } from './storage';
-import { appendTrackingPixel, extractLinkUrls, rewriteLinks } from './html-injection';
+import { appendDepthBeacons, appendTrackingPixel, extractLinkUrls, rewriteLinks } from './html-injection';
 import { formatRecipients } from './recipient-format';
 import { describeStatus, statusIconDataUrl } from './status-chip';
 import type { ComposeView, InboxSDKInstance } from './inboxsdk-types';
@@ -65,8 +65,14 @@ async function injectTrackingThenSend(composeView: ComposeView): Promise<string 
       const linkUrls = extractLinkUrls(html);
       const subject = composeView.getSubject();
       const recipient = formatRecipients(composeView.getToRecipients());
-      const result = await createMessage(settings.apiKey, { linkUrls, subject, recipient }, COMPOSE_INJECTION_TIMEOUT_MS);
-      composeView.setBodyHTML(appendTrackingPixel(rewriteLinks(html, result.linkMap), result.pixelUrl));
+      const result = await createMessage(settings.apiKey, { linkUrls, subject, recipient, bodyLength: html.length }, COMPOSE_INJECTION_TIMEOUT_MS);
+      let trackedHtml = appendTrackingPixel(rewriteLinks(html, result.linkMap), result.pixelUrl);
+      if (result.beaconUrls) {
+        // ADR-19: only present when the backend judged this body long enough
+        // to plausibly hit Gmail's clip threshold — most sends won't have this.
+        trackedHtml = appendDepthBeacons(trackedHtml, result.beaconUrls);
+      }
+      composeView.setBodyHTML(trackedHtml);
       msgId = result.msgId;
     }
   } catch (err) {

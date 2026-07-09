@@ -70,6 +70,7 @@ async function logPixelFetch(env: Env, pixelToken: string, request: Request): Pr
       headers,
       fetchSequenceMs,
       occurredAt: occurredAt.toISOString(),
+      beaconPosition: 'top', // ADR-19: this is the primary pixel; mid/bottom are logged by routes/beacon.ts
     });
 
     // ADR-15: classify immediately, in this same background task, instead

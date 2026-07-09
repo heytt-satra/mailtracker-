@@ -1,11 +1,26 @@
 import { Hono } from 'hono';
 import type { CreateMessageRequest, CreateMessageResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
-import { getSupabase, insertLinkTokens, insertMessage } from '../db/client';
+import { getSupabase, insertBeaconTokens, insertLinkTokens, insertMessage } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { randomToken } from '../lib/crypto';
 
 export const messagesRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+/**
+ * ADR-19: only messages whose composed HTML body is already this long get
+ * depth beacons at all. Gmail's well-documented "message clipped" behavior
+ * truncates the rendered DOM at roughly 102KB of the assembled message
+ * (quoted history included, which the extension's bodyLength measurement
+ * doesn't see) — staying comfortably under that with this gate means a
+ * message this long is very likely to actually clip, so the resulting
+ * depthReached signal means what it claims. For the common case (a normal,
+ * much-shorter email), no beacons are generated at all: injecting them
+ * would just be redundant noise indistinguishable from the ordinary
+ * top-pixel open, plus unnecessary deliverability/load-time cost for zero
+ * new information (see docs/read-detection-plan.md §8 risks).
+ */
+const LONG_MESSAGE_BEACON_THRESHOLD_BYTES = 90_000;
 
 // A real email body doesn't have hundreds of distinct links; this is a
 // sanity cap against a malformed/malicious client turning one send into an
@@ -51,6 +66,17 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
     pixelUrl: `${origin}/p/${pixelToken}.gif`,
     linkMap: Object.fromEntries(linkTokens.map((l) => [l.originalUrl, `${origin}/l/${l.token}`])),
   };
+
+  if (typeof body.bodyLength === 'number' && body.bodyLength > LONG_MESSAGE_BEACON_THRESHOLD_BYTES) {
+    const midToken = randomToken();
+    const bottomToken = randomToken();
+    await insertBeaconTokens(db, message.id, [
+      { token: midToken, position: 'mid' },
+      { token: bottomToken, position: 'bottom' },
+    ]);
+    response.beaconUrls = { mid: `${origin}/b/${midToken}.gif`, bottom: `${origin}/b/${bottomToken}.gif` };
+  }
+
   return c.json(response, 201);
 });
 

@@ -49,6 +49,22 @@ create table link_tokens (
 );
 create index idx_link_tokens_message_id on link_tokens(message_id);
 
+-- Track B depth beacons (ADR-19). A message only gets rows here when its
+-- composed HTML body was long enough to plausibly hit Gmail's ~102KB "message
+-- clipped" threshold (see LONG_MESSAGE_BEACON_THRESHOLD_BYTES in
+-- apps/backend/src/routes/messages.ts) — most messages have none. Separate
+-- from messages.pixel_token so the original open-detection path (ADR-1/ADR-4)
+-- is never touched by this addition.
+create table beacon_tokens (
+  id uuid primary key default gen_random_uuid(),
+  message_id uuid not null references messages(id) on delete cascade,
+  token text not null unique,
+  position text not null check (position in ('mid','bottom')),
+  created_at timestamptz not null default now()
+);
+create index idx_beacon_tokens_message_id on beacon_tokens(message_id);
+create index idx_beacon_tokens_token on beacon_tokens(token);
+
 create table raw_events (
   id uuid primary key default gen_random_uuid(),
   message_id uuid not null references messages(id) on delete cascade,
@@ -65,7 +81,10 @@ create table raw_events (
   -- null until the classifier sweep (wrangler.toml cron) processes this row.
   -- Lets the sweep cheaply select `where classified_at is null` instead of
   -- diffing against the verdicts table on every run.
-  classified_at timestamptz
+  classified_at timestamptz,
+  -- 'top' for the original pixel, 'mid'/'bottom' for Track B depth beacons
+  -- (ADR-19), null for link_click rows (position doesn't apply to a click).
+  beacon_position text check (beacon_position in ('top','mid','bottom'))
 );
 create index idx_raw_events_message_id on raw_events(message_id);
 create index idx_raw_events_occurred_at on raw_events(occurred_at);
@@ -121,6 +140,7 @@ $$;
 alter table users enable row level security;
 alter table messages enable row level security;
 alter table link_tokens enable row level security;
+alter table beacon_tokens enable row level security;
 alter table raw_events enable row level security;
 alter table verdicts enable row level security;
 alter table asn_intel enable row level security;

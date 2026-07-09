@@ -1,7 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { AsnIntel, EventKind, IntelCategory, MessageStatus, Verdict } from '@mailtrack/shared';
+import type { AsnIntel, BeaconPosition, EventKind, IntelCategory, MessageStatus, Verdict } from '@mailtrack/shared';
 import type { Env } from '../types';
 import { computeReadSignal, type ReadSignal } from '../read-signal';
+import { computeDepthReached } from '../depth-signal';
 
 export function getSupabase(env: Env): SupabaseClient {
   return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
@@ -112,6 +113,7 @@ export interface VerdictStats extends ReadSignal {
   clickCount: number;
   firstOpenedAt: string | null;
   lastOpenedAt: string | null;
+  depthReached: ReturnType<typeof computeDepthReached>;
 }
 
 /**
@@ -126,7 +128,8 @@ export interface VerdictStats extends ReadSignal {
  * Fetches ALL verdict kinds (not just verified_open/verified_click) because
  * computeReadSignal needs machine_suspect/not_verifiable rows too, to tell
  * "auto-only activity seen" apart from "nothing happened yet" — see
- * read-signal.ts.
+ * read-signal.ts. Also joins raw_events.beacon_position (ADR-19) so
+ * computeDepthReached can run in the same pass — see depth-signal.ts.
  */
 export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds: string[]): Promise<Map<string, VerdictStats>> {
   const stats = new Map<string, VerdictStats>();
@@ -134,12 +137,12 @@ export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds:
 
   const { data, error } = await db
     .from('verdicts')
-    .select('message_id, verdict, created_at')
+    .select('message_id, verdict, created_at, raw_events(beacon_position)')
     .in('message_id', messageIds)
     .order('created_at', { ascending: true });
   if (error) throw error;
 
-  const eventsByMessage = new Map<string, { verdict: Verdict; createdAt: string }[]>();
+  const eventsByMessage = new Map<string, { verdict: Verdict; createdAt: string; beaconPosition: BeaconPosition | null }[]>();
 
   for (const row of data ?? []) {
     const entry = stats.get(row.message_id) ?? {
@@ -150,6 +153,7 @@ export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds:
       readConfidence: null,
       minEngagedSeconds: null,
       readEvidence: null,
+      depthReached: null,
     };
     if (row.verdict === 'verified_open') {
       entry.openCount++;
@@ -160,14 +164,16 @@ export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds:
     }
     stats.set(row.message_id, entry);
 
+    const rawEvent = Array.isArray(row.raw_events) ? row.raw_events[0] : row.raw_events;
     const events = eventsByMessage.get(row.message_id) ?? [];
-    events.push({ verdict: row.verdict as Verdict, createdAt: row.created_at });
+    events.push({ verdict: row.verdict as Verdict, createdAt: row.created_at, beaconPosition: (rawEvent?.beacon_position as BeaconPosition | null) ?? null });
     eventsByMessage.set(row.message_id, events);
   }
 
   for (const [messageId, events] of eventsByMessage) {
     const entry = stats.get(messageId)!;
     Object.assign(entry, computeReadSignal(events));
+    entry.depthReached = computeDepthReached(events);
   }
 
   return stats;
@@ -193,6 +199,36 @@ export async function getMessageByPixelToken(db: SupabaseClient, pixelToken: str
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+/** ADR-19: two extra beacon tokens (mid/bottom), generated only for messages long enough to warrant depth tracking. */
+export async function insertBeaconTokens(
+  db: SupabaseClient,
+  messageId: string,
+  beacons: { token: string; position: Extract<BeaconPosition, 'mid' | 'bottom'> }[],
+): Promise<void> {
+  if (beacons.length === 0) return;
+  const { error } = await db
+    .from('beacon_tokens')
+    .insert(beacons.map((b) => ({ message_id: messageId, token: b.token, position: b.position })));
+  if (error) throw error;
+}
+
+/** Distinct from getMessageByPixelToken: a beacon token resolves through beacon_tokens, not messages.pixel_token — keeps the original open-detection path untouched (ADR-19). */
+export async function getMessageByBeaconToken(
+  db: SupabaseClient,
+  beaconToken: string,
+): Promise<{ message: MessageRow; position: Extract<BeaconPosition, 'mid' | 'bottom'> } | null> {
+  const { data, error } = await db
+    .from('beacon_tokens')
+    .select(`position, messages(${MESSAGE_COLUMNS})`)
+    .eq('token', beaconToken)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const message = Array.isArray(data.messages) ? data.messages[0] : data.messages;
+  if (!message) return null;
+  return { message, position: data.position as Extract<BeaconPosition, 'mid' | 'bottom'> };
 }
 
 export async function getLinkToken(
@@ -233,6 +269,8 @@ export async function insertRawEvent(
      * round-trip.
      */
     occurredAt: string;
+    /** ADR-19. 'top' for the primary pixel, 'mid'/'bottom' for depth beacons, undefined/null for link_click. */
+    beaconPosition?: BeaconPosition | null;
   },
 ): Promise<{ id: string; occurredAt: string }> {
   const { data, error } = await db
@@ -247,6 +285,7 @@ export async function insertRawEvent(
       headers: params.headers,
       fetch_sequence_ms: params.fetchSequenceMs,
       occurred_at: params.occurredAt,
+      beacon_position: params.beaconPosition ?? null,
     })
     .select('id')
     .single();

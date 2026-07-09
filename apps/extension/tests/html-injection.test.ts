@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendTrackingPixel, extractLinkUrls, rewriteLinks } from '../src/html-injection';
+import { appendDepthBeacons, appendTrackingPixel, extractLinkUrls, rewriteLinks } from '../src/html-injection';
 
 describe('extractLinkUrls', () => {
   it('finds http(s) links and dedupes', () => {
@@ -47,5 +47,38 @@ describe('appendTrackingPixel', () => {
     // text like "Sent with MailTrack" is what FR2 forbids).
     expect(result).not.toMatch(/sent with/i);
     expect(result).not.toMatch(/>[^<]*mailtrack[^<]*</i);
+  });
+});
+
+describe('appendDepthBeacons', () => {
+  it('inserts both beacon images and preserves all original content', () => {
+    const html = '<p>Paragraph one.</p><p>Paragraph two.</p><p>Paragraph three.</p>';
+    const result = appendDepthBeacons(html, { mid: 'https://api.mailtrack.dev/b/mid1.gif', bottom: 'https://api.mailtrack.dev/b/bottom1.gif' });
+    expect(result).toContain('Paragraph one.');
+    expect(result).toContain('Paragraph two.');
+    expect(result).toContain('Paragraph three.');
+    expect(result).toContain('src="https://api.mailtrack.dev/b/mid1.gif"');
+    expect(result).toContain('src="https://api.mailtrack.dev/b/bottom1.gif"');
+  });
+
+  it('places the mid beacon before the bottom beacon in document order', () => {
+    const html = '<p>' + 'x'.repeat(200) + '</p><p>' + 'y'.repeat(200) + '</p>';
+    const result = appendDepthBeacons(html, { mid: 'https://api.mailtrack.dev/b/mid1.gif', bottom: 'https://api.mailtrack.dev/b/bottom1.gif' });
+    expect(result.indexOf('mid1.gif')).toBeLessThan(result.indexOf('bottom1.gif'));
+  });
+
+  it('never splits inside an existing tag — the mid image always lands right after a closing >', () => {
+    const html = '<p>' + 'a'.repeat(500) + '</p><a href="https://example.com/very/long/path/that/would/straddle/the/midpoint">link text</a>';
+    const result = appendDepthBeacons(html, { mid: 'https://api.mailtrack.dev/b/mid1.gif', bottom: 'https://api.mailtrack.dev/b/bottom1.gif' });
+    expect(result).toContain('<a href="https://example.com/very/long/path/that/would/straddle/the/midpoint">link text</a>');
+    expect(result).not.toMatch(/href="[^"]*<img/); // the mid <img> tag must never end up inside an href attribute
+  });
+
+  it('falls back to appending both at the end for a body too short to have a > past the midpoint', () => {
+    const html = 'plain text no tags';
+    const result = appendDepthBeacons(html, { mid: 'https://api.mailtrack.dev/b/mid1.gif', bottom: 'https://api.mailtrack.dev/b/bottom1.gif' });
+    expect(result.startsWith(html)).toBe(true);
+    expect(result).toContain('mid1.gif');
+    expect(result).toContain('bottom1.gif');
   });
 });

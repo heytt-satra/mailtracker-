@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import type { Env, Variables } from './types';
 import { messagesRoute } from './routes/messages';
 import { pixelRoute } from './routes/pixel';
+import { beaconRoute } from './routes/beacon';
 import { clickRoute } from './routes/click';
 import { eventsRoute } from './routes/events';
 import { authRoute } from './routes/auth';
@@ -14,8 +15,8 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT }));
 
-// Only the authenticated /v1/* API needs CORS at all — /p/* and /l/* are
-// fetched as an <img> src / top-level navigation, neither of which is
+// Only the authenticated /v1/* API needs CORS at all — /p/*, /b/*, and /l/*
+// are fetched as an <img> src / top-level navigation, neither of which is
 // subject to CORS. env is only available per-request in Workers, so the
 // cors() middleware is constructed fresh on each call rather than once at
 // module scope. See PLAN.md Known Issues: ALLOWED_EXTENSION_ORIGIN is unset
@@ -25,6 +26,7 @@ app.use('/v1/*', (c, next) => cors({ origin: c.env.ALLOWED_EXTENSION_ORIGIN ?? '
 app.route('/', authRoute);
 app.route('/', messagesRoute);
 app.route('/', pixelRoute);
+app.route('/', beaconRoute);
 app.route('/', clickRoute);
 app.route('/', eventsRoute);
 

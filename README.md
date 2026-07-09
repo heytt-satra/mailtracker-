@@ -20,6 +20,8 @@ docs/            Engineering docs
 
 Verdicts only escalate: `Sent → Delivered → Opened (verified) → Clicked`. Never fabricated, never downgraded.
 
+**Scope note:** tracking is injected by hooking Gmail's *web* compose window (Chrome + this extension). An email composed and sent from the Gmail mobile app is not tracked — there's no extension running there to inject anything. Receiving is unaffected by platform: recipients on any device/client (including mobile) are tracked normally, since that side is just the pixel/link classifier, not the compose hook.
+
 ## Status
 
 Backend, extension, dashboard, and self-serve auth are all code-complete, typechecked, unit-tested (58 tests total), and — as of 2026-07-08 — deployed. The backend is live and smoke-tested against production (pixel/click/auth endpoints all verified to behave correctly). The one remaining step is loading the extension into a real Chrome profile and completing signup, which requires clicking a real email confirmation link — see "Loading the extension" below. The sections below are also the general runbook if you're setting this up fresh with your own accounts.

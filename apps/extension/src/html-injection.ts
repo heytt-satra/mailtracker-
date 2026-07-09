@@ -43,3 +43,25 @@ export function appendTrackingPixel(html: string, pixelUrl: string): string {
   const img = `<img src="${pixelUrl}" width="1" height="1" alt="" border="0" />`;
   return `${html}${img}`;
 }
+
+/**
+ * Track B depth beacons (ADR-19). Only called for messages already past
+ * LONG_MESSAGE_BEACON_THRESHOLD_BYTES (see routes/messages.ts) — the mid
+ * beacon is inserted roughly halfway through the body, the bottom beacon at
+ * the very end, same invisible-1x1-image approach as appendTrackingPixel.
+ * The mid insertion point is snapped forward to the next `>` at or after the
+ * body's midpoint rather than a raw character split, so it can never land
+ * inside an existing tag's attributes and corrupt the markup; falls back to
+ * appending at the end if no `>` exists past the midpoint (a body too short
+ * to have realistically triggered the length gate in the first place).
+ */
+export function appendDepthBeacons(html: string, beaconUrls: { mid: string; bottom: string }): string {
+  const midImg = `<img src="${beaconUrls.mid}" width="1" height="1" alt="" border="0" />`;
+  const bottomImg = `<img src="${beaconUrls.bottom}" width="1" height="1" alt="" border="0" />`;
+
+  const midpoint = Math.floor(html.length / 2);
+  const insertAt = html.indexOf('>', midpoint);
+  const withMid = insertAt === -1 ? `${html}${midImg}` : `${html.slice(0, insertAt + 1)}${midImg}${html.slice(insertAt + 1)}`;
+
+  return `${withMid}${bottomImg}`;
+}

@@ -240,6 +240,7 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
     ${message.firstOpenedAt ? `<span>First opened <strong>${formatSentAt(message.firstOpenedAt)}</strong></span>` : ''}
     ${message.lastOpenedAt && message.lastOpenedAt !== message.firstOpenedAt ? `<span>Last opened <strong>${formatSentAt(message.lastOpenedAt)}</strong></span>` : ''}
     ${message.minEngagedSeconds !== null ? `<span>Engaged <strong>&ge; ${message.minEngagedSeconds}s</strong> (proven minimum)</span>` : ''}
+    ${message.depthReached ? `<span>Depth <strong>reached the ${message.depthReached === 'bottom' ? 'end' : 'middle'} of a long message</strong></span>` : ''}
   `;
 
   let readEvidenceEl: HTMLDivElement | null = null;
