@@ -19,8 +19,15 @@ export const SUPABASE_ANON_KEY = 'sb_publishable_Acb2i9J-QrtTJanPk3tV3A_S_lTWTdh
 
 // NFR2: tracking must never block or delay a send. If POST /v1/messages
 // hasn't resolved by this deadline, the compose hook lets the email send
-// untracked rather than waiting further.
-export const COMPOSE_INJECTION_TIMEOUT_MS = 1500;
+// untracked rather than waiting further. Was 1500ms — measured (curl,
+// time_starttransfer) at ~620ms round-trip for a trivial auth-check-only
+// request against the live Worker; a real request doing two inserts
+// (message + link_tokens) plus the sender's own network latency to
+// Cloudflare's edge could plausibly exceed 1500ms, causing silent,
+// undiagnosable timeouts by design (fail-open swallows the error). Raised
+// to give real requests headroom; a few extra seconds of perceived send
+// delay is a better trade than tracking silently never working.
+export const COMPOSE_INJECTION_TIMEOUT_MS = 4000;
 
 // Background worker poll cadence for /v1/events/poll. chrome.alarms clamps
 // periodInMinutes to a 1-minute floor in packed extensions, so this is the

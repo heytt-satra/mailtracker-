@@ -41,12 +41,25 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
   });
 }
 
-/** Returns the created msgId on success, or null if tracking was skipped/failed (send still proceeds either way). */
+/**
+ * Returns the created msgId on success, or null if tracking was
+ * skipped/failed (send still proceeds either way — NFR2). Every skip/fail
+ * path logs to console.error: fail-open means never blocking or delaying
+ * the send, it does NOT mean failing invisibly. A silent catch here was
+ * previously indistinguishable from "nothing went wrong" — found live,
+ * when a real user's tracked sends were silently failing with zero
+ * diagnostic signal anywhere.
+ */
 async function injectTrackingThenSend(composeView: ComposeView): Promise<string | null> {
   let msgId: string | null = null;
   try {
     const settings = await getSettings();
-    if (settings.trackingEnabledByDefault && settings.apiKey) {
+    if (!settings.trackingEnabledByDefault || !settings.apiKey) {
+      console.warn('[MailTrack] tracking skipped: not signed in or tracking disabled in options', {
+        trackingEnabledByDefault: settings.trackingEnabledByDefault,
+        hasApiKey: !!settings.apiKey,
+      });
+    } else {
       const html = composeView.getHTMLContent();
       const linkUrls = extractLinkUrls(html);
       const subject = composeView.getSubject();
@@ -54,9 +67,11 @@ async function injectTrackingThenSend(composeView: ComposeView): Promise<string 
       composeView.setBodyHTML(appendTrackingPixel(rewriteLinks(html, result.linkMap), result.pixelUrl));
       msgId = result.msgId;
     }
-  } catch {
+  } catch (err) {
     // NFR2 fail-open: timeout, network error, or 4xx/5xx all fall through
-    // to an untracked send below. Tracking must never be able to block mail.
+    // to an untracked send below — the email always sends regardless. But
+    // "fail open" only means don't block; it never meant fail silently.
+    console.error('[MailTrack] tracking injection failed, email will send untracked:', err);
   } finally {
     try {
       composeView.send();
