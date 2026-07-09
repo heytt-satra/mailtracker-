@@ -81,6 +81,12 @@ export interface MessageSummary {
   subject: string | null;
   status: MessageStatus;
   sentAt: string;
+  /** Count of raw_events classified verified_open — how many times a human read this, not just whether. */
+  openCount: number;
+  /** Count of raw_events classified verified_click. */
+  clickCount: number;
+  firstOpenedAt: string | null;
+  lastOpenedAt: string | null;
 }
 
 export interface MessageListResponse {

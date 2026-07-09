@@ -104,6 +104,47 @@ export async function listMessagesForUser(
   return { rows, nextOffset: rows.length === LIST_PAGE_SIZE ? offset + LIST_PAGE_SIZE : null };
 }
 
+export interface VerdictStats {
+  openCount: number;
+  clickCount: number;
+  firstOpenedAt: string | null;
+  lastOpenedAt: string | null;
+}
+
+/**
+ * Aggregated per-message open/click counts for a page of messages. Supabase's
+ * fluent query builder has no GROUP BY, and this doesn't need a Postgres
+ * function (unlike classify_ip_category, which runs on the pixel/click hot
+ * path) — it's a bounded read (one page of messages at a time, LIST_PAGE_SIZE
+ * = 50) on a dashboard endpoint, so aggregating the raw verdict rows in JS is
+ * simpler than adding another SQL function for a one-off admin-page query.
+ */
+export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds: string[]): Promise<Map<string, VerdictStats>> {
+  const stats = new Map<string, VerdictStats>();
+  if (messageIds.length === 0) return stats;
+
+  const { data, error } = await db
+    .from('verdicts')
+    .select('message_id, verdict, created_at')
+    .in('message_id', messageIds)
+    .in('verdict', ['verified_open', 'verified_click'])
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  for (const row of data ?? []) {
+    const entry = stats.get(row.message_id) ?? { openCount: 0, clickCount: 0, firstOpenedAt: null, lastOpenedAt: null };
+    if (row.verdict === 'verified_open') {
+      entry.openCount++;
+      entry.firstOpenedAt ??= row.created_at;
+      entry.lastOpenedAt = row.created_at;
+    } else if (row.verdict === 'verified_click') {
+      entry.clickCount++;
+    }
+    stats.set(row.message_id, entry);
+  }
+  return stats;
+}
+
 export async function insertLinkTokens(
   db: SupabaseClient,
   messageId: string,

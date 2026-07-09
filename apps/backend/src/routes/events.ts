@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { MessageListResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
-import { deleteMessage, getMessageById, getMessageTimeline, getSupabase, listMessagesForUser } from '../db/client';
+import { deleteMessage, getMessageById, getMessageTimeline, getSupabase, getVerdictStatsForMessages, listMessagesForUser } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 
 export const eventsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -18,8 +18,12 @@ eventsRoute.get('/v1/messages', async (c) => {
   const offset = Number(c.req.query('offset') ?? '0');
   const db = getSupabase(c.env);
   const { rows, nextOffset } = await listMessagesForUser(db, c.get('userId'), Number.isFinite(offset) && offset >= 0 ? offset : 0);
+  const stats = await getVerdictStatsForMessages(db, rows.map((row) => row.id));
   const response: MessageListResponse = {
-    messages: rows.map((row) => ({ msgId: row.id, subject: row.subject, status: row.status, sentAt: row.sent_at })),
+    messages: rows.map((row) => {
+      const rowStats = stats.get(row.id) ?? { openCount: 0, clickCount: 0, firstOpenedAt: null, lastOpenedAt: null };
+      return { msgId: row.id, subject: row.subject, status: row.status, sentAt: row.sent_at, ...rowStats };
+    }),
     nextOffset,
   };
   return c.json(response);
