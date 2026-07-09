@@ -102,7 +102,12 @@ function paintRow(row: HTMLTableRowElement, message: MessageSummary): void {
     row.children,
   ) as HTMLTableCellElement[];
 
-  statusCell.innerHTML = `<span class="badge" style="color:${color};background:${color}1a" title="${tooltip}"><span class="dot" style="background:${color}"></span>${message.status}</span>`;
+  // A bounce is more important than the ordinary status ladder and
+  // deliberately overrides its display (ADR-20): "sent" would otherwise sit
+  // there looking normal forever for a message that never actually arrived.
+  statusCell.innerHTML = message.bounce
+    ? `<span class="badge" style="color:#d93025;background:#d9302533" title="${escapeHtml(message.bounce.reason)}"><span class="dot" style="background:#d93025"></span>Bounced</span>`
+    : `<span class="badge" style="color:${color};background:${color}1a" title="${tooltip}"><span class="dot" style="background:${color}"></span>${message.status}</span>`;
 
   const readChip = describeReadConfidence(message.readConfidence);
   readConfidenceCell.innerHTML = readChip
@@ -253,6 +258,13 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
       : escapeHtml(message.readEvidence);
   }
 
+  let bounceEvidenceEl: HTMLDivElement | null = null;
+  if (message.bounce) {
+    bounceEvidenceEl = document.createElement('div');
+    bounceEvidenceEl.className = 'read-evidence';
+    bounceEvidenceEl.innerHTML = `<span class="badge" style="color:#d93025;background:#d9302533"><span class="dot" style="background:#d93025"></span>Bounced</span> ${escapeHtml(message.bounce.reason)} (detected ${formatSentAt(message.bounce.detectedAt)})`;
+  }
+
   const timelineHeader = document.createElement('div');
   timelineHeader.className = 'muted';
   timelineHeader.style.marginBottom = '0.4rem';
@@ -261,7 +273,14 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
   const timelineContainer = document.createElement('div');
   timelineContainer.textContent = 'Loading timeline…';
 
-  cell.append(meta, stats, ...(readEvidenceEl ? [readEvidenceEl] : []), timelineHeader, timelineContainer);
+  cell.append(
+    meta,
+    stats,
+    ...(bounceEvidenceEl ? [bounceEvidenceEl] : []),
+    ...(readEvidenceEl ? [readEvidenceEl] : []),
+    timelineHeader,
+    timelineContainer,
+  );
   detailRow.appendChild(cell);
   row.after(detailRow);
   expandedRows.set(msgId, detailRow);

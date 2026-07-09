@@ -1,4 +1,12 @@
-import type { CreateMessageRequest, CreateMessageResponse, MessageListResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
+import type {
+  CreateMessageRequest,
+  CreateMessageResponse,
+  MessageListResponse,
+  MessageStatusResponse,
+  ReportBounceRequest,
+  ReportBounceResponse,
+  TimelineEvent,
+} from '@mailtrack/shared';
 import { MAILTRACK_API_BASE_URL } from './config';
 
 export class MailTrackApiError extends Error {}
@@ -69,6 +77,11 @@ export async function exportMessageCsv(apiKey: string, msgId: string): Promise<s
 
 export function deleteMessage(apiKey: string, msgId: string): Promise<{ deleted: boolean }> {
   return request(`/v1/messages/${msgId}`, apiKey, { method: 'DELETE' });
+}
+
+/** ADR-20. Called when the inbox watcher (src/bounce-detection.ts + inboxsdk-app.ts) recognizes a bounce notification. */
+export function reportBounce(apiKey: string, body: ReportBounceRequest): Promise<ReportBounceResponse> {
+  return request<ReportBounceResponse>('/v1/bounces', apiKey, { method: 'POST', body: JSON.stringify(body) });
 }
 
 /**

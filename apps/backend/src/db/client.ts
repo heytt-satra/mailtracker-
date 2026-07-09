@@ -87,6 +87,8 @@ export interface MessageSummaryRow {
   recipient: string | null;
   status: MessageStatus;
   sent_at: string;
+  bounce_detected_at: string | null;
+  bounce_reason: string | null;
 }
 
 const LIST_PAGE_SIZE = 50;
@@ -99,13 +101,40 @@ export async function listMessagesForUser(
 ): Promise<{ rows: MessageSummaryRow[]; nextOffset: number | null }> {
   const { data, error } = await db
     .from('messages')
-    .select('id, subject, recipient, status, sent_at')
+    .select('id, subject, recipient, status, sent_at, bounce_detected_at, bounce_reason')
     .eq('user_id', userId)
     .order('sent_at', { ascending: false })
     .range(offset, offset + LIST_PAGE_SIZE - 1);
   if (error) throw error;
   const rows = data ?? [];
   return { rows, nextOffset: rows.length === LIST_PAGE_SIZE ? offset + LIST_PAGE_SIZE : null };
+}
+
+/**
+ * Candidate messages for bounce correlation (ADR-20): every non-bounced
+ * message this user sent in the last MAX_BOUNCE_DELAY_MS window (see
+ * bounce-correlation.ts) — recipient/subject narrowing happens in the pure
+ * correlateBounce() function, not here, so that logic stays testable
+ * without a database.
+ */
+export async function getBounceCandidateMessages(
+  db: SupabaseClient,
+  userId: string,
+  sinceIso: string,
+): Promise<{ id: string; recipient: string | null; subject: string | null; sentAt: string }[]> {
+  const { data, error } = await db
+    .from('messages')
+    .select('id, recipient, subject, sent_at')
+    .eq('user_id', userId)
+    .is('bounce_detected_at', null)
+    .gte('sent_at', sinceIso);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({ id: row.id, recipient: row.recipient, subject: row.subject, sentAt: row.sent_at }));
+}
+
+export async function markMessageBounced(db: SupabaseClient, messageId: string, params: { detectedAt: string; reason: string }): Promise<void> {
+  const { error } = await db.from('messages').update({ bounce_detected_at: params.detectedAt, bounce_reason: params.reason }).eq('id', messageId);
+  if (error) throw error;
 }
 
 export interface VerdictStats extends ReadSignal {

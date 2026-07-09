@@ -1,16 +1,18 @@
 import * as InboxSDKLoader from '@inboxsdk/core';
 import { COMPOSE_INJECTION_TIMEOUT_MS, INBOXSDK_APP_ID } from './config';
-import { createMessage, getMessageStatus } from './api-client';
-import { getMsgIdForGmailMessage, getSettings, recordGmailMessageId } from './storage';
+import { createMessage, getMessageStatus, reportBounce } from './api-client';
+import { getMsgIdForGmailMessage, getSettings, hasReportedBounce, markBounceReported, recordGmailMessageId } from './storage';
 import { appendDepthBeacons, appendTrackingPixel, extractLinkUrls, rewriteLinks } from './html-injection';
 import { formatRecipients } from './recipient-format';
 import { describeStatus, statusIconDataUrl } from './status-chip';
-import type { ComposeView, InboxSDKInstance } from './inboxsdk-types';
+import { extractBounceDetails, isBounceSender } from './bounce-detection';
+import type { ComposeView, InboxSDKInstance, MessageView } from './inboxsdk-types';
 
 export async function startMailTrack(): Promise<void> {
   const sdk = (await InboxSDKLoader.load(2, INBOXSDK_APP_ID)) as unknown as InboxSDKInstance;
   registerComposeTracking(sdk);
   registerStatusChips(sdk);
+  registerBounceDetection(sdk);
 }
 
 function registerComposeTracking(sdk: InboxSDKInstance): void {
@@ -110,4 +112,69 @@ function registerStatusChips(sdk: InboxSDKInstance): void {
       // A failed status fetch must never break Gmail's own UI; the chip just doesn't render this pass.
     }
   });
+}
+
+/**
+ * ADR-20. Watches every message rendered in the sender's own inbox for
+ * Gmail's own bounce-notification format and reports recognized ones to the
+ * backend for correlation. Per MessageView's documented load lifecycle
+ * (confirmed against the installed package's own .d.ts, not assumed):
+ * getSender()/getBodyElement() can throw if called before the message has
+ * loaded, which is common for collapsed messages in a thread — so this
+ * checks isLoaded() first and falls back to the 'load' event rather than
+ * calling those methods unconditionally.
+ */
+function registerBounceDetection(sdk: InboxSDKInstance): void {
+  sdk.Conversations.registerMessageViewHandlerAll((messageView) => {
+    if (messageView.isLoaded()) {
+      handlePossibleBounce(messageView).catch(() => {});
+    } else {
+      messageView.on('load', ({ messageView: loaded }) => {
+        handlePossibleBounce(loaded).catch(() => {});
+      });
+    }
+  });
+}
+
+async function handlePossibleBounce(messageView: MessageView): Promise<void> {
+  const settings = await getSettings();
+  if (!settings.apiKey || !settings.bounceDetectionEnabled) return;
+
+  let sender;
+  try {
+    sender = messageView.getSender();
+  } catch {
+    return; // isLoaded() raced with the actual load — the 'load' event (if this came from there) or a later render will retry
+  }
+  if (!isBounceSender(sender)) return; // the overwhelming majority of inbox messages, filtered out before any body text is ever read
+
+  const gmailMessageId = await messageView.getMessageIDAsync().catch(() => null);
+  if (!gmailMessageId || (await hasReportedBounce(gmailMessageId))) return;
+
+  let bodyText: string;
+  try {
+    bodyText = messageView.getBodyElement().textContent ?? '';
+  } catch {
+    return;
+  }
+
+  const details = extractBounceDetails(bodyText);
+  if (!details.recipientEmail) return; // sender matched mailer-daemon but this isn't a permanent-failure notice we recognize (e.g. a delay/retry notice) — never guess
+
+  try {
+    await reportBounce(settings.apiKey, {
+      recipientEmail: details.recipientEmail,
+      subjectExcerpt: details.subjectExcerpt ?? undefined,
+      diagnostic: details.diagnostic ?? undefined,
+      // MessageView exposes getDateString(), but it's locale-formatted prose,
+      // not a reliably parseable timestamp — "now" (processing time) is an
+      // honest approximation and the backend's correlation window (7 days)
+      // already tolerates far more slack than this could ever introduce.
+      bounceReceivedAt: new Date().toISOString(),
+    });
+    await markBounceReported(gmailMessageId);
+  } catch (err) {
+    console.error('[MailTrack] failed to report detected bounce:', err);
+    // Deliberately NOT marking as reported on failure — worth retrying on the next render.
+  }
 }

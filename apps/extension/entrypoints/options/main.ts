@@ -13,6 +13,7 @@ const authStatusEl = document.getElementById('authStatus') as HTMLDivElement;
 const apiKeyInput = document.getElementById('apiKey') as HTMLInputElement;
 const trackingEnabledInput = document.getElementById('trackingEnabled') as HTMLInputElement;
 const notificationsEnabledInput = document.getElementById('notificationsEnabled') as HTMLInputElement;
+const bounceDetectionEnabledInput = document.getElementById('bounceDetectionEnabled') as HTMLInputElement;
 const statusEl = document.getElementById('status') as HTMLDivElement;
 
 async function refreshView(): Promise<void> {
@@ -24,6 +25,7 @@ async function refreshView(): Promise<void> {
     signedInEmailEl.textContent = settings.accountEmail ? `Signed in as ${settings.accountEmail}` : 'API key active';
     trackingEnabledInput.checked = settings.trackingEnabledByDefault;
     notificationsEnabledInput.checked = settings.notificationsEnabled;
+    bounceDetectionEnabledInput.checked = settings.bounceDetectionEnabled;
   }
 }
 
@@ -74,6 +76,7 @@ document.getElementById('save')?.addEventListener('click', async () => {
   await setSettings({
     trackingEnabledByDefault: trackingEnabledInput.checked,
     notificationsEnabled: notificationsEnabledInput.checked,
+    bounceDetectionEnabled: bounceDetectionEnabledInput.checked,
   });
   statusEl.textContent = 'Saved.';
   setTimeout(() => (statusEl.textContent = ''), 2000);

@@ -3,6 +3,8 @@ import {
   getMsgIdForGmailMessage,
   getPollCursor,
   getSettings,
+  hasReportedBounce,
+  markBounceReported,
   recordGmailMessageId,
   setPollCursor,
   setSettings,
@@ -29,7 +31,13 @@ describe('storage', () => {
 
   it('getSettings returns defaults when nothing is stored', async () => {
     const settings = await getSettings();
-    expect(settings).toEqual({ apiKey: null, accountEmail: null, trackingEnabledByDefault: true, notificationsEnabled: true });
+    expect(settings).toEqual({
+      apiKey: null,
+      accountEmail: null,
+      trackingEnabledByDefault: true,
+      notificationsEnabled: true,
+      bounceDetectionEnabled: true,
+    });
   });
 
   it('setSettings merges into existing settings rather than replacing them', async () => {
@@ -55,5 +63,12 @@ describe('storage', () => {
     expect(await getPollCursor()).toBe(new Date(0).toISOString());
     await setPollCursor('2026-07-08T12:00:00.000Z');
     expect(await getPollCursor()).toBe('2026-07-08T12:00:00.000Z');
+  });
+
+  it('bounce dedup: unreported by default, reported after marking', async () => {
+    expect(await hasReportedBounce('gmail-bounce-1')).toBe(false);
+    await markBounceReported('gmail-bounce-1');
+    expect(await hasReportedBounce('gmail-bounce-1')).toBe(true);
+    expect(await hasReportedBounce('gmail-bounce-2')).toBe(false); // marking one ID doesn't affect another
   });
 });

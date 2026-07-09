@@ -31,7 +31,8 @@ eventsRoute.get('/v1/messages', async (c) => {
         readEvidence: null,
         depthReached: null,
       };
-      return { msgId: row.id, subject: row.subject, recipient: row.recipient, status: row.status, sentAt: row.sent_at, ...rowStats };
+      const bounce = row.bounce_detected_at ? { detectedAt: row.bounce_detected_at, reason: row.bounce_reason ?? '' } : null;
+      return { msgId: row.id, subject: row.subject, recipient: row.recipient, status: row.status, sentAt: row.sent_at, ...rowStats, bounce };
     }),
     nextOffset,
   };

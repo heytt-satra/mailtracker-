@@ -33,6 +33,38 @@ export type BeaconPosition = 'top' | 'mid' | 'bottom';
  */
 export type DepthReached = 'mid' | 'bottom' | null;
 
+/**
+ * ADR-20. A bounce is fundamentally different from everything else this
+ * product tracks: it is discovered evidence that the message never reached
+ * the recipient at all, not increasing confidence of engagement. Kept fully
+ * separate from MessageStatus's escalate-only ladder rather than shoehorned
+ * into it — a bounce doesn't "escalate" anything, it's an orthogonal fact
+ * that can be true alongside status='sent' (the common case: we never got
+ * any positive signal because there was never anything to get).
+ */
+export interface BounceInfo {
+  detectedAt: string;
+  /** Plain-English evidence, including the correlation method and its confidence — Track E honesty layer applied to this feature too. */
+  reason: string;
+}
+
+export interface ReportBounceRequest {
+  /** The email address Gmail's bounce notification says it could not deliver to. */
+  recipientEmail: string;
+  /** Best-effort excerpt of the original subject line, if the bounce notification's body included one — used only to disambiguate multiple recent sends to the same recipient. */
+  subjectExcerpt?: string;
+  /** Short diagnostic excerpt from the bounce body (e.g. "550 5.1.1 address not found") — shown back to the sender as evidence, never used for matching. */
+  diagnostic?: string;
+  /** When the bounce notification itself arrived in the sender's inbox. */
+  bounceReceivedAt: string;
+}
+
+export interface ReportBounceResponse {
+  /** Null when no sent message could be confidently matched to this bounce — an honest "couldn't correlate this" rather than a guess. */
+  matchedMsgId: string | null;
+  reason: string;
+}
+
 export interface RawFetchEvent {
   messageId: string;
   kind: EventKind;
@@ -140,6 +172,8 @@ export interface MessageSummary {
   readEvidence: string | null;
   /** ADR-19. Only ever set for messages long enough to have generated depth beacons in the first place. */
   depthReached: DepthReached;
+  /** ADR-20. Null unless a bounce notification was detected and correlated to this message. */
+  bounce: BounceInfo | null;
 }
 
 export interface MessageListResponse {
