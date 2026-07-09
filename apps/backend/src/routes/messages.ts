@@ -16,6 +16,7 @@ const MAX_LINK_URLS = 50;
 // this for a dashboard list row; truncating rather than rejecting keeps a
 // long subject from blocking an otherwise-normal send (NFR2 fail-open spirit).
 const MAX_SUBJECT_LENGTH = 500;
+const MAX_RECIPIENT_LENGTH = 500;
 
 messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
   // Bounds the blast radius of a leaked/compromised API key — 30 tracked
@@ -33,12 +34,13 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
   }
   const validLinkUrls = body.linkUrls.filter(isTrackableUrl);
   const subject = typeof body.subject === 'string' ? body.subject.trim().slice(0, MAX_SUBJECT_LENGTH) || undefined : undefined;
+  const recipient = typeof body.recipient === 'string' ? body.recipient.trim().slice(0, MAX_RECIPIENT_LENGTH) || undefined : undefined;
 
   const db = getSupabase(c.env);
   const userId = c.get('userId');
   const pixelToken = randomToken();
 
-  const message = await insertMessage(db, { userId, gmailMessageId: body.gmailMessageId, subject, pixelToken });
+  const message = await insertMessage(db, { userId, gmailMessageId: body.gmailMessageId, subject, recipient, pixelToken });
 
   const linkTokens = validLinkUrls.map((originalUrl) => ({ token: randomToken(), originalUrl }));
   await insertLinkTokens(db, message.id, linkTokens);

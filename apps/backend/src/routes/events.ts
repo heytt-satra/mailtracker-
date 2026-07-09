@@ -22,7 +22,7 @@ eventsRoute.get('/v1/messages', async (c) => {
   const response: MessageListResponse = {
     messages: rows.map((row) => {
       const rowStats = stats.get(row.id) ?? { openCount: 0, clickCount: 0, firstOpenedAt: null, lastOpenedAt: null };
-      return { msgId: row.id, subject: row.subject, status: row.status, sentAt: row.sent_at, ...rowStats };
+      return { msgId: row.id, subject: row.subject, recipient: row.recipient, status: row.status, sentAt: row.sent_at, ...rowStats };
     }),
     nextOffset,
   };

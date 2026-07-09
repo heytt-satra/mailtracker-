@@ -51,6 +51,8 @@ export interface CreateMessageRequest {
   gmailMessageId?: string;
   /** Plaintext, shown back to the sender in the dashboard (M5) — see db/migrations/0001_init.sql comment on messages.subject. */
   subject?: string;
+  /** Plaintext "To" recipients, joined — the primary dashboard identifier (subject alone can't tell repeat sends apart). See db/migrations/0002_add_recipient.sql. */
+  recipient?: string;
   linkUrls: string[];
 }
 
@@ -79,6 +81,8 @@ export interface TimelineEvent {
 export interface MessageSummary {
   msgId: string;
   subject: string | null;
+  /** Primary dashboard identifier — see CreateMessageRequest.recipient. */
+  recipient: string | null;
   status: MessageStatus;
   sentAt: string;
   /** Count of raw_events classified verified_open — how many times a human read this, not just whether. */

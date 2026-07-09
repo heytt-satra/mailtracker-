@@ -28,6 +28,11 @@ create table messages (
   -- ever wrote or read it — because a one-way hash can't serve the actual
   -- product need. Capped at 500 chars at the API layer (routes/messages.ts).
   subject text,
+  -- Plaintext, same reasoning as subject above. Added because a single
+  -- sender may reuse the same subject line across many recipients, making
+  -- subject alone useless for telling tracked sends apart in the dashboard
+  -- — see db/migrations/0002_add_recipient.sql for the live-DB migration.
+  recipient text,
   sent_at timestamptz not null default now(),
   status text not null default 'sent'
     check (status in ('sent','delivered','opened','clicked','not_verifiable')),
