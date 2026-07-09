@@ -8,7 +8,15 @@ export default defineConfig({
   manifest: {
     name: 'MailTrack',
     description: 'Gmail email tracking that reports verified opens, not every pixel fetch.',
-    permissions: ['storage', 'notifications', 'alarms'],
+    // 'scripting' is required by @inboxsdk/core, not used directly by our
+    // own code: InboxSDK injects a "page world" bridge script into Gmail's
+    // actual page context (content scripts run in an isolated world and
+    // can't reach Gmail's own JS state otherwise) via
+    // chrome.scripting.executeScript({world: 'MAIN', ...}), which needs this
+    // permission declared or it fails with "Couldn't inject pageWorld.js" —
+    // found live, post-deployment, via a real user's Gmail console errors;
+    // verified against InboxSDK's own reference manifest before adding.
+    permissions: ['storage', 'notifications', 'alarms', 'scripting'],
     // *.supabase.co covers Supabase's standard hosted project domain (the
     // options page's signup/login calls Supabase Auth directly, ADR-10). A
     // self-hosted Supabase instance would need its own origin added here.
