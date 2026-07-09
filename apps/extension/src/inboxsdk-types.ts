@@ -16,10 +16,17 @@ export interface SentEvent {
   getMessageID: () => string;
 }
 
+/** Confirmed shape via InboxSDK's common-data-types docs: name may be empty, emailAddress always present. */
+export interface Contact {
+  name: string;
+  emailAddress: string;
+}
+
 export interface ComposeView {
   getHTMLContent: () => string;
   setBodyHTML: (html: string) => void;
   getSubject: () => string;
+  getToRecipients: () => Contact[];
   send: (options?: { sendAndArchive?: boolean }) => void;
   on(event: 'presending', handler: (event: PresendingEvent) => void): void;
   on(event: 'sent', handler: (event: SentEvent) => void): void;

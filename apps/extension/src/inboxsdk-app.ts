@@ -3,6 +3,7 @@ import { COMPOSE_INJECTION_TIMEOUT_MS, INBOXSDK_APP_ID } from './config';
 import { createMessage, getMessageStatus } from './api-client';
 import { getMsgIdForGmailMessage, getSettings, recordGmailMessageId } from './storage';
 import { appendTrackingPixel, extractLinkUrls, rewriteLinks } from './html-injection';
+import { formatRecipients } from './recipient-format';
 import { describeStatus, statusIconDataUrl } from './status-chip';
 import type { ComposeView, InboxSDKInstance } from './inboxsdk-types';
 
@@ -63,7 +64,8 @@ async function injectTrackingThenSend(composeView: ComposeView): Promise<string 
       const html = composeView.getHTMLContent();
       const linkUrls = extractLinkUrls(html);
       const subject = composeView.getSubject();
-      const result = await createMessage(settings.apiKey, { linkUrls, subject }, COMPOSE_INJECTION_TIMEOUT_MS);
+      const recipient = formatRecipients(composeView.getToRecipients());
+      const result = await createMessage(settings.apiKey, { linkUrls, subject, recipient }, COMPOSE_INJECTION_TIMEOUT_MS);
       composeView.setBodyHTML(appendTrackingPixel(rewriteLinks(html, result.linkMap), result.pixelUrl));
       msgId = result.msgId;
     }
