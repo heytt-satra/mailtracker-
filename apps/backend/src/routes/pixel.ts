@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { classifyIpCategory, getMessageByPixelToken, getSupabase, insertRawEvent } from '../db/client';
+import { classifyAndApplyOne } from '../classifier/classify-and-apply';
 import { getRequestAsn } from '../lib/cf';
 import { sha256Hex } from '../lib/crypto';
 
@@ -55,19 +56,42 @@ async function logPixelFetch(env: Env, pixelToken: string, request: Request): Pr
     // rather than ASN based.
     const ipCategory = await classifyIpCategory(db, ip).catch(() => null);
 
-    await insertRawEvent(db, {
+    const occurredAt = new Date();
+    const userAgent = request.headers.get('User-Agent');
+    const fetchSequenceMs = occurredAt.getTime() - new Date(message.sent_at).getTime();
+
+    const rawEvent = await insertRawEvent(db, {
       messageId: message.id,
       kind: 'pixel_fetch',
-      userAgent: request.headers.get('User-Agent'),
+      userAgent,
       ipHash: await sha256Hex(ip),
       ipCategory,
       asn,
       headers,
-      fetchSequenceMs: Date.now() - new Date(message.sent_at).getTime(),
+      fetchSequenceMs,
+      occurredAt: occurredAt.toISOString(),
+    });
+
+    // ADR-15: classify immediately, in this same background task, instead
+    // of waiting for the next per-minute cron sweep — still entirely after
+    // the pixel response was already sent, so this can never slow down the
+    // fetch itself (ADR-1's actual constraint). A real user hitting a
+    // near-60-second lag before an open showed up anywhere is what
+    // triggered this; the cron sweep (sweep.ts) remains as a fallback for
+    // whatever this async task doesn't get to finish.
+    await classifyAndApplyOne(db, {
+      id: rawEvent.id,
+      message_id: message.id,
+      kind: 'pixel_fetch',
+      occurred_at: rawEvent.occurredAt,
+      user_agent: userAgent,
+      asn,
+      ip_category: ipCategory,
+      fetch_sequence_ms: fetchSequenceMs,
     });
   } catch {
     // Logging failures must never surface to the client; the pixel response
-    // has already been sent. Swallow and rely on classifier sweep gaps
-    // being visible in dashboards rather than crashing anything user-facing.
+    // has already been sent. Swallow and rely on the classifier sweep
+    // fallback picking up anything that didn't finish here.
   }
 }

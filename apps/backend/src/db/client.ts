@@ -62,7 +62,7 @@ const MESSAGE_COLUMNS = 'id, user_id, pixel_token, sent_at, status, status_updat
 
 export async function insertMessage(
   db: SupabaseClient,
-  params: { userId: string; gmailMessageId?: string; subject?: string; pixelToken: string },
+  params: { userId: string; gmailMessageId?: string; subject?: string; recipient?: string; pixelToken: string },
 ): Promise<MessageRow> {
   const { data, error } = await db
     .from('messages')
@@ -70,6 +70,7 @@ export async function insertMessage(
       user_id: params.userId,
       gmail_message_id: params.gmailMessageId ?? null,
       subject: params.subject ?? null,
+      recipient: params.recipient ?? null,
       pixel_token: params.pixelToken,
     })
     .select(MESSAGE_COLUMNS)
@@ -81,6 +82,7 @@ export async function insertMessage(
 export interface MessageSummaryRow {
   id: string;
   subject: string | null;
+  recipient: string | null;
   status: MessageStatus;
   sent_at: string;
 }
@@ -95,7 +97,7 @@ export async function listMessagesForUser(
 ): Promise<{ rows: MessageSummaryRow[]; nextOffset: number | null }> {
   const { data, error } = await db
     .from('messages')
-    .select('id, subject, status, sent_at')
+    .select('id, subject, recipient, status, sent_at')
     .eq('user_id', userId)
     .order('sent_at', { ascending: false })
     .range(offset, offset + LIST_PAGE_SIZE - 1);
@@ -198,8 +200,15 @@ export async function insertRawEvent(
     asn: number | null;
     headers: Record<string, string>;
     fetchSequenceMs: number;
+    /**
+     * Explicit rather than relying on the column default so the caller can
+     * classify inline (ADR-15) with an `occurred_at` value guaranteed
+     * identical to what's stored, instead of reading it back with a second
+     * round-trip.
+     */
+    occurredAt: string;
   },
-): Promise<{ id: string }> {
+): Promise<{ id: string; occurredAt: string }> {
   const { data, error } = await db
     .from('raw_events')
     .insert({
@@ -211,11 +220,12 @@ export async function insertRawEvent(
       asn: params.asn,
       headers: params.headers,
       fetch_sequence_ms: params.fetchSequenceMs,
+      occurred_at: params.occurredAt,
     })
     .select('id')
     .single();
   if (error) throw error;
-  return data;
+  return { id: data.id, occurredAt: params.occurredAt };
 }
 
 /** Resolves an IP against the ip_ranges table via the classify_ip_category() Postgres function (ADR-8). */

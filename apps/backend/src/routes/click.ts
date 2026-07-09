@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { classifyIpCategory, getLinkToken, getSupabase, insertRawEvent } from '../db/client';
+import { classifyAndApplyOne } from '../classifier/classify-and-apply';
 import { getRequestAsn } from '../lib/cf';
 import { sha256Hex } from '../lib/crypto';
 
@@ -20,9 +21,10 @@ clickRoute.get('/l/:token', async (c) => {
   }
 
   // Log in the background: the human is already mid-navigation, don't make
-  // them wait on our insert. Classification (including the scanner-click
-  // check, see ADR-9-adjacent rules.ts logic) happens later in the sweep,
-  // independent of how long logging takes.
+  // them wait on our insert. Classified immediately within this same
+  // background task (ADR-15) rather than deferred to the once-a-minute
+  // cron sweep — a click should reflect as "Clicked" within seconds, not
+  // up to a minute later.
   c.executionCtx.waitUntil(
     (async () => {
       const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
@@ -34,15 +36,32 @@ clickRoute.get('/l/:token', async (c) => {
 
       const { asn } = getRequestAsn(c.req.raw);
       const ipCategory = await classifyIpCategory(db, ip).catch(() => null);
-      await insertRawEvent(db, {
+      const occurredAt = new Date();
+      const userAgent = c.req.header('User-Agent') ?? null;
+      const fetchSequenceMs = occurredAt.getTime() - new Date(link.sentAt).getTime();
+
+      const rawEvent = await insertRawEvent(db, {
         messageId: link.messageId,
         kind: 'link_click',
-        userAgent: c.req.header('User-Agent') ?? null,
+        userAgent,
         ipHash: await sha256Hex(ip),
         ipCategory,
         asn,
         headers: {},
-        fetchSequenceMs: Date.now() - new Date(link.sentAt).getTime(),
+        fetchSequenceMs,
+        occurredAt: occurredAt.toISOString(),
+      }).catch(() => null);
+      if (!rawEvent) return;
+
+      await classifyAndApplyOne(db, {
+        id: rawEvent.id,
+        message_id: link.messageId,
+        kind: 'link_click',
+        occurred_at: rawEvent.occurredAt,
+        user_agent: userAgent,
+        asn,
+        ip_category: ipCategory,
+        fetch_sequence_ms: fetchSequenceMs,
       }).catch(() => {});
     })(),
   );
