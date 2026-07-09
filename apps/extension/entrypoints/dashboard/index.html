@@ -4,39 +4,88 @@
     <meta charset="utf-8" />
     <title>MailTrack dashboard</title>
     <style>
-      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; color: #202124; }
-      h1 { font-size: 1.25rem; }
-      #signedOutNotice { display: none; color: #5f6368; }
+      :root {
+        --ink: #202124;
+        --muted: #5f6368;
+        --border: #e8eaed;
+        --blue: #1a73e8;
+        --green: #188038;
+        --grey: #9aa0a6;
+        --bg-soft: #f8f9fa;
+      }
+      * { box-sizing: border-box; }
+      body { font-family: system-ui, -apple-system, sans-serif; max-width: 880px; margin: 2rem auto; padding: 0 1rem; color: var(--ink); }
+      h1 { font-size: 1.3rem; margin: 0 0 0.25rem; }
+      .subtitle { color: var(--muted); font-size: 0.85rem; margin: 0 0 1.5rem; }
+
+      #signedOutNotice { display: none; color: var(--muted); }
       #signedOutNotice.visible { display: block; }
-      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-      th { text-align: left; font-size: 0.8rem; color: #5f6368; padding: 0.5rem; border-bottom: 1px solid #dadce0; }
-      td { padding: 0.5rem; border-bottom: 1px solid #f1f3f4; font-size: 0.9rem; vertical-align: top; }
+
+      .summary-row { display: flex; gap: 1.5rem; margin-bottom: 1.5rem; }
+      .stat { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1rem; }
+      .stat .value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
+      .stat .label { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+
+      .toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
+      #refresh { font-size: 0.82rem; padding: 0.4rem 0.8rem; cursor: pointer; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--ink); }
+      #refresh:hover { background: var(--bg-soft); }
+
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
+      td { padding: 0.65rem 0.6rem; border-bottom: 1px solid var(--border); font-size: 0.88rem; vertical-align: middle; }
       tr.message-row { cursor: pointer; }
-      tr.message-row:hover { background: #f8f9fa; }
-      .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; }
-      .subject { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .detail-row td { background: #fafafa; padding: 0.75rem 1rem; }
-      .event { padding: 0.4rem 0; border-bottom: 1px dotted #e0e0e0; font-size: 0.85rem; }
+      tr.message-row:hover td { background: var(--bg-soft); }
+
+      .badge { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
+      .badge .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+      .subject { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .count { font-variant-numeric: tabular-nums; }
+      .count.zero { color: var(--grey); }
+      .muted { color: var(--muted); font-size: 0.82rem; }
+
+      .detail-row td { background: var(--bg-soft); padding: 1rem 1.25rem; }
+      .detail-meta { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.85rem; font-size: 0.82rem; }
+      .msg-id { font-family: ui-monospace, monospace; background: white; border: 1px solid var(--border); border-radius: 4px; padding: 0.15rem 0.45rem; color: var(--muted); }
+      .copy-btn { font-size: 0.75rem; padding: 0.15rem 0.5rem; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; background: white; }
+      .detail-stats { display: flex; gap: 1.25rem; margin-bottom: 1rem; font-size: 0.82rem; color: var(--muted); }
+      .detail-stats strong { color: var(--ink); }
+
+      .event { padding: 0.5rem 0; border-bottom: 1px dotted var(--border); font-size: 0.84rem; }
+      .event:last-child { border-bottom: none; }
       .event.suppressed { opacity: 0.5; }
       .event .verdict { font-weight: 600; }
-      .event .reason { color: #5f6368; }
-      .empty { color: #5f6368; padding: 1rem 0; }
-      #loadMore { margin-top: 1rem; }
-      #loading { color: #5f6368; }
+      .event .reason { color: var(--muted); }
+
+      .empty { color: var(--muted); padding: 2rem 0; text-align: center; }
+      #loadMore { display: block; margin: 1rem auto 0; font-size: 0.85rem; padding: 0.5rem 1.25rem; cursor: pointer; border: 1px solid var(--border); border-radius: 6px; background: none; }
+      #loading { color: var(--muted); }
     </style>
   </head>
   <body>
     <h1>MailTrack dashboard</h1>
+    <p class="subtitle">Verified opens and clicks only — never a raw pixel fetch.</p>
     <p id="signedOutNotice">Sign in from the extension's options page first.</p>
     <p id="loading">Loading…</p>
-    <table id="messageTable" style="display:none">
-      <thead>
-        <tr><th>Status</th><th>Subject</th><th>Sent</th></tr>
-      </thead>
-      <tbody id="messageTableBody"></tbody>
-    </table>
-    <p id="emptyState" class="empty" style="display:none">No tracked messages yet. Send a tracked email from Gmail to see it here.</p>
-    <button id="loadMore" style="display:none">Load more</button>
+
+    <div id="content" style="display:none">
+      <div class="summary-row">
+        <div class="stat"><div class="value" id="statTotal">0</div><div class="label">Tracked messages</div></div>
+        <div class="stat"><div class="value" id="statOpened">0</div><div class="label">Verified opens</div></div>
+        <div class="stat"><div class="value" id="statClicked">0</div><div class="label">Link clicks</div></div>
+      </div>
+
+      <div class="toolbar"><button id="refresh">Refresh</button></div>
+
+      <table id="messageTable">
+        <thead>
+          <tr><th>Status</th><th>Subject</th><th>Sent</th><th>Opens</th><th>Clicks</th></tr>
+        </thead>
+        <tbody id="messageTableBody"></tbody>
+      </table>
+      <p id="emptyState" class="empty" style="display:none">No tracked messages yet. Send a tracked email from Gmail to see it here.</p>
+      <button id="loadMore" style="display:none">Load more</button>
+    </div>
 
     <script type="module" src="./main.ts"></script>
   </body>
