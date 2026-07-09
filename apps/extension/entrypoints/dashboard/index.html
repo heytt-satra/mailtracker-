@@ -26,7 +26,10 @@
       .stat .value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
       .stat .label { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
 
-      .toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
+      .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+      .live-indicator { font-size: 0.78rem; color: var(--muted); display: flex; align-items: center; gap: 0.4rem; }
+      .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2s ease-in-out infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
       #refresh { font-size: 0.82rem; padding: 0.4rem 0.8rem; cursor: pointer; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--ink); }
       #refresh:hover { background: var(--bg-soft); }
 
@@ -39,7 +42,8 @@
       .badge { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
       .badge .dot { width: 7px; height: 7px; border-radius: 50%; }
 
-      .subject { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .identifier { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .identifier .subject-line { display: block; font-size: 0.76rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .count { font-variant-numeric: tabular-nums; }
       .count.zero { color: var(--grey); }
       .muted { color: var(--muted); font-size: 0.82rem; }
@@ -75,11 +79,14 @@
         <div class="stat"><div class="value" id="statClicked">0</div><div class="label">Link clicks</div></div>
       </div>
 
-      <div class="toolbar"><button id="refresh">Refresh</button></div>
+      <div class="toolbar">
+        <span class="live-indicator"><span class="live-dot"></span>Auto-updating every 5s</span>
+        <button id="refresh">Refresh now</button>
+      </div>
 
       <table id="messageTable">
         <thead>
-          <tr><th>Status</th><th>Subject</th><th>Sent</th><th>Opens</th><th>Clicks</th></tr>
+          <tr><th>Status</th><th>Recipient</th><th>Sent</th><th>Opens</th><th>Clicks</th></tr>
         </thead>
         <tbody id="messageTableBody"></tbody>
       </table>

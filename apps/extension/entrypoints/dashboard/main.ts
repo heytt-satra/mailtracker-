@@ -15,18 +15,22 @@ const statTotalEl = document.getElementById('statTotal') as HTMLDivElement;
 const statOpenedEl = document.getElementById('statOpened') as HTMLDivElement;
 const statClickedEl = document.getElementById('statClicked') as HTMLDivElement;
 const COLUMN_COUNT = 5;
+const POLL_INTERVAL_MS = 5000;
+const PAGE_SIZE = 50; // must match apps/backend LIST_PAGE_SIZE
 
 let apiKey: string | null = null;
 let nextOffset: number | null = 0;
-// Per-row expanded timeline is fetched once and cached — repeated clicks
-// just toggle visibility rather than re-fetching.
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+// Source of truth for everything currently rendered — polling updates these
+// maps in place rather than tearing down and rebuilding the table, so an
+// expanded detail row survives a background refresh instead of collapsing
+// out from under whoever's reading it.
+const messagesById = new Map<string, MessageSummary>();
+const rowsById = new Map<string, HTMLTableRowElement>();
+// Expanded timeline rows, fetched once and cached — repeated clicks just
+// toggle visibility rather than re-fetching.
 const expandedRows = new Map<string, HTMLTableRowElement>();
-// Summary stats accumulate across whatever pages have been loaded so far —
-// labeled "loaded messages" rather than claiming to be an all-time total
-// that hasn't actually been fetched yet.
-let totalLoaded = 0;
-let totalOpened = 0;
-let totalClicked = 0;
 
 async function init(): Promise<void> {
   const settings = await getSettings();
@@ -40,23 +44,47 @@ async function init(): Promise<void> {
 
   content.style.display = '';
   await loadPage();
+  startPolling();
+}
+
+function startPolling(): void {
+  stopPolling();
+  pollTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return; // no point burning API calls on a background tab
+    pollRefresh().catch(() => {
+      // A failed poll must never surface as an error to the user — it just means the next tick tries again.
+    });
+  }, POLL_INTERVAL_MS);
+}
+
+// Registered once at module scope, not inside startPolling() — that gets
+// called again on every manual "Refresh now" click, and re-registering this
+// listener each time would stack up duplicate handlers, firing pollRefresh()
+// multiple times per visibility change.
+document.addEventListener('visibilitychange', () => {
+  // Catch up immediately when the tab regains focus, rather than waiting up to POLL_INTERVAL_MS.
+  if (document.visibilityState === 'visible') pollRefresh().catch(() => {});
+});
+
+function stopPolling(): void {
+  if (pollTimer !== null) clearInterval(pollTimer);
+  pollTimer = null;
 }
 
 async function resetAndReload(): Promise<void> {
   tbody.innerHTML = '';
   expandedRows.clear();
+  messagesById.clear();
+  rowsById.clear();
   nextOffset = 0;
-  totalLoaded = 0;
-  totalOpened = 0;
-  totalClicked = 0;
-  updateSummary();
   await loadPage();
 }
 
 function updateSummary(): void {
-  statTotalEl.textContent = String(totalLoaded);
-  statOpenedEl.textContent = String(totalOpened);
-  statClickedEl.textContent = String(totalClicked);
+  const all = [...messagesById.values()];
+  statTotalEl.textContent = String(all.length);
+  statOpenedEl.textContent = String(all.filter((m) => m.openCount > 0).length);
+  statClickedEl.textContent = String(all.filter((m) => m.clickCount > 0).length);
 }
 
 function countCell(count: number): HTMLTableCellElement {
@@ -66,31 +94,43 @@ function countCell(count: number): HTMLTableCellElement {
   return cell;
 }
 
-function buildRow(message: MessageSummary): HTMLTableRowElement {
-  const row = document.createElement('tr');
-  row.className = 'message-row';
-
+/** Applies a message's current data to an existing row's cells — used by both first render and every poll refresh. */
+function paintRow(row: HTMLTableRowElement, message: MessageSummary): void {
   const { color, tooltip } = describeStatus(message.status);
-  const statusCell = document.createElement('td');
-  const badge = document.createElement('span');
-  badge.className = 'badge';
-  badge.style.color = color;
-  badge.style.background = `${color}1a`; // ~10% tint of the status color
-  badge.title = tooltip;
-  badge.innerHTML = `<span class="dot" style="background:${color}"></span>${message.status}`;
-  statusCell.appendChild(badge);
+  const [statusCell, identifierCell, sentCell, opensCell, clicksCell] = Array.from(row.children) as HTMLTableCellElement[];
 
-  const subjectCell = document.createElement('td');
-  subjectCell.className = 'subject';
-  subjectCell.textContent = truncateSubject(message.subject);
-  subjectCell.title = message.subject ?? '';
+  statusCell.innerHTML = `<span class="badge" style="color:${color};background:${color}1a" title="${tooltip}"><span class="dot" style="background:${color}"></span>${message.status}</span>`;
 
-  const sentCell = document.createElement('td');
+  identifierCell.className = 'identifier';
+  identifierCell.title = message.recipient ?? '';
+  identifierCell.innerHTML = '';
+  const primary = document.createElement('div');
+  primary.textContent = message.recipient || '(no recipient)';
+  identifierCell.appendChild(primary);
+  if (message.subject) {
+    const subjectLine = document.createElement('span');
+    subjectLine.className = 'subject-line';
+    subjectLine.textContent = truncateSubject(message.subject, 60);
+    identifierCell.appendChild(subjectLine);
+  }
+
   sentCell.className = 'muted';
   sentCell.textContent = formatSentAt(message.sentAt);
 
-  row.append(statusCell, subjectCell, sentCell, countCell(message.openCount), countCell(message.clickCount));
-  row.addEventListener('click', () => toggleDetail(message, row));
+  opensCell.className = message.openCount > 0 ? 'count' : 'count zero';
+  opensCell.textContent = String(message.openCount);
+  clicksCell.className = message.clickCount > 0 ? 'count' : 'count zero';
+  clicksCell.textContent = String(message.clickCount);
+}
+
+function buildRow(message: MessageSummary): HTMLTableRowElement {
+  const row = document.createElement('tr');
+  row.className = 'message-row';
+  // Placeholder cells — paintRow fills them in immediately below, but the
+  // element references need to exist first since paintRow reads row.children.
+  row.append(document.createElement('td'), document.createElement('td'), document.createElement('td'), countCell(0), countCell(0));
+  paintRow(row, message);
+  row.addEventListener('click', () => toggleDetail(message.msgId, row));
   return row;
 }
 
@@ -102,10 +142,10 @@ async function loadPage(): Promise<void> {
   nextOffset = newNextOffset;
 
   for (const message of messages) {
-    tbody.appendChild(buildRow(message));
-    totalLoaded++;
-    if (message.openCount > 0) totalOpened++;
-    if (message.clickCount > 0) totalClicked++;
+    messagesById.set(message.msgId, message);
+    const row = buildRow(message);
+    rowsById.set(message.msgId, row);
+    tbody.appendChild(row);
   }
   updateSummary();
 
@@ -113,13 +153,44 @@ async function loadPage(): Promise<void> {
   loadMoreButton.style.display = nextOffset !== null ? '' : 'none';
 }
 
-async function toggleDetail(message: MessageSummary, row: HTMLTableRowElement): Promise<void> {
-  const existing = expandedRows.get(message.msgId);
+/** Re-fetches every currently-loaded page and updates rows in place — new messages get prepended, existing ones repainted, nothing collapses. */
+async function pollRefresh(): Promise<void> {
+  if (!apiKey) return;
+  const pagesLoaded = Math.max(1, Math.ceil(messagesById.size / PAGE_SIZE));
+  const seenThisPoll = new Set<string>();
+
+  for (let page = 0; page < pagesLoaded; page++) {
+    const { messages } = await listMessages(apiKey, page * PAGE_SIZE);
+    for (const message of messages) {
+      seenThisPoll.add(message.msgId);
+      messagesById.set(message.msgId, message);
+      const existingRow = rowsById.get(message.msgId);
+      if (existingRow) {
+        paintRow(existingRow, message);
+      } else {
+        // A genuinely new message appeared since the last load — list is
+        // newest-first, so it belongs at the top.
+        const row = buildRow(message);
+        rowsById.set(message.msgId, row);
+        tbody.prepend(row);
+      }
+    }
+    if (messages.length < PAGE_SIZE) break;
+  }
+
+  updateSummary();
+  emptyState.style.display = tbody.children.length === 0 ? '' : 'none';
+}
+
+async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<void> {
+  const existing = expandedRows.get(msgId);
   if (existing) {
     existing.style.display = existing.style.display === 'none' ? '' : 'none';
     return;
   }
   if (!apiKey) return;
+  const message = messagesById.get(msgId);
+  if (!message) return;
 
   const detailRow = document.createElement('tr');
   detailRow.className = 'detail-row';
@@ -148,6 +219,7 @@ async function toggleDetail(message: MessageSummary, row: HTMLTableRowElement): 
   const stats = document.createElement('div');
   stats.className = 'detail-stats';
   stats.innerHTML = `
+    ${message.subject ? `<span>Subject <strong>${escapeHtml(message.subject)}</strong></span>` : ''}
     <span>Opened <strong>${message.openCount}</strong> time${message.openCount === 1 ? '' : 's'}</span>
     <span>Clicked <strong>${message.clickCount}</strong> time${message.clickCount === 1 ? '' : 's'}</span>
     ${message.firstOpenedAt ? `<span>First opened <strong>${formatSentAt(message.firstOpenedAt)}</strong></span>` : ''}
@@ -165,10 +237,10 @@ async function toggleDetail(message: MessageSummary, row: HTMLTableRowElement): 
   cell.append(meta, stats, timelineHeader, timelineContainer);
   detailRow.appendChild(cell);
   row.after(detailRow);
-  expandedRows.set(message.msgId, detailRow);
+  expandedRows.set(msgId, detailRow);
 
   try {
-    const { events } = await getMessageTimeline(apiKey, message.msgId);
+    const { events } = await getMessageTimeline(apiKey, msgId);
     timelineContainer.innerHTML = '';
     if (events.length === 0) {
       timelineContainer.textContent = 'No events yet.';
@@ -192,6 +264,8 @@ function escapeHtml(input: string): string {
 }
 
 loadMoreButton.addEventListener('click', loadPage);
-refreshButton.addEventListener('click', resetAndReload);
+refreshButton.addEventListener('click', () => {
+  resetAndReload().then(() => startPolling());
+});
 
 init();
