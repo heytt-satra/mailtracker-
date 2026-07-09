@@ -2,6 +2,7 @@ import { getMessageTimeline, listMessages } from '../../src/api-client';
 import { formatSentAt, truncateSubject } from '../../src/dashboard-format';
 import { getSettings } from '../../src/storage';
 import { describeStatus } from '../../src/status-chip';
+import { describeReadConfidence } from '../../src/read-confidence-chip';
 import type { MessageSummary } from '@mailtrack/shared';
 
 const signedOutNotice = document.getElementById('signedOutNotice') as HTMLParagraphElement;
@@ -14,7 +15,7 @@ const refreshButton = document.getElementById('refresh') as HTMLButtonElement;
 const statTotalEl = document.getElementById('statTotal') as HTMLDivElement;
 const statOpenedEl = document.getElementById('statOpened') as HTMLDivElement;
 const statClickedEl = document.getElementById('statClicked') as HTMLDivElement;
-const COLUMN_COUNT = 5;
+const COLUMN_COUNT = 6;
 const POLL_INTERVAL_MS = 5000;
 const PAGE_SIZE = 50; // must match apps/backend LIST_PAGE_SIZE
 
@@ -97,9 +98,16 @@ function countCell(count: number): HTMLTableCellElement {
 /** Applies a message's current data to an existing row's cells — used by both first render and every poll refresh. */
 function paintRow(row: HTMLTableRowElement, message: MessageSummary): void {
   const { color, tooltip } = describeStatus(message.status);
-  const [statusCell, identifierCell, sentCell, opensCell, clicksCell] = Array.from(row.children) as HTMLTableCellElement[];
+  const [statusCell, readConfidenceCell, identifierCell, sentCell, opensCell, clicksCell] = Array.from(
+    row.children,
+  ) as HTMLTableCellElement[];
 
   statusCell.innerHTML = `<span class="badge" style="color:${color};background:${color}1a" title="${tooltip}"><span class="dot" style="background:${color}"></span>${message.status}</span>`;
+
+  const readChip = describeReadConfidence(message.readConfidence);
+  readConfidenceCell.innerHTML = readChip
+    ? `<span class="badge" style="color:${readChip.color};background:${readChip.color}1a" title="${escapeHtml(message.readEvidence ?? '')}"><span class="dot" style="background:${readChip.color}"></span>${readChip.label}</span>`
+    : '<span class="muted">—</span>';
 
   identifierCell.className = 'identifier';
   identifierCell.title = message.recipient ?? '';
@@ -128,7 +136,14 @@ function buildRow(message: MessageSummary): HTMLTableRowElement {
   row.className = 'message-row';
   // Placeholder cells — paintRow fills them in immediately below, but the
   // element references need to exist first since paintRow reads row.children.
-  row.append(document.createElement('td'), document.createElement('td'), document.createElement('td'), countCell(0), countCell(0));
+  row.append(
+    document.createElement('td'),
+    document.createElement('td'),
+    document.createElement('td'),
+    document.createElement('td'),
+    countCell(0),
+    countCell(0),
+  );
   paintRow(row, message);
   row.addEventListener('click', () => toggleDetail(message.msgId, row));
   return row;
@@ -224,7 +239,18 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
     <span>Clicked <strong>${message.clickCount}</strong> time${message.clickCount === 1 ? '' : 's'}</span>
     ${message.firstOpenedAt ? `<span>First opened <strong>${formatSentAt(message.firstOpenedAt)}</strong></span>` : ''}
     ${message.lastOpenedAt && message.lastOpenedAt !== message.firstOpenedAt ? `<span>Last opened <strong>${formatSentAt(message.lastOpenedAt)}</strong></span>` : ''}
+    ${message.minEngagedSeconds !== null ? `<span>Engaged <strong>&ge; ${message.minEngagedSeconds}s</strong> (proven minimum)</span>` : ''}
   `;
+
+  let readEvidenceEl: HTMLDivElement | null = null;
+  if (message.readEvidence) {
+    readEvidenceEl = document.createElement('div');
+    readEvidenceEl.className = 'read-evidence';
+    const chip = describeReadConfidence(message.readConfidence);
+    readEvidenceEl.innerHTML = chip
+      ? `<span class="badge" style="color:${chip.color};background:${chip.color}1a"><span class="dot" style="background:${chip.color}"></span>${chip.label}</span> ${escapeHtml(message.readEvidence)}`
+      : escapeHtml(message.readEvidence);
+  }
 
   const timelineHeader = document.createElement('div');
   timelineHeader.className = 'muted';
@@ -234,7 +260,7 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
   const timelineContainer = document.createElement('div');
   timelineContainer.textContent = 'Loading timeline…';
 
-  cell.append(meta, stats, timelineHeader, timelineContainer);
+  cell.append(meta, stats, ...(readEvidenceEl ? [readEvidenceEl] : []), timelineHeader, timelineContainer);
   detailRow.appendChild(cell);
   row.after(detailRow);
   expandedRows.set(msgId, detailRow);

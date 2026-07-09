@@ -6,6 +6,20 @@ export type EventKind = 'pixel_fetch' | 'link_click';
 
 export type Verdict = 'machine_suspect' | 'verified_open' | 'verified_click' | 'not_verifiable';
 
+/**
+ * "Did they actually read it" verdict, distinct from MessageStatus's
+ * send-pipeline ladder (sent/delivered/opened/clicked). Computed from the
+ * pattern of verified_open/verified_click timestamps already captured —
+ * no new tracking mechanism, no fabricated duration. See PLAN.md ADR-18
+ * and docs/read-detection-plan.md for why exact seconds-open isn't
+ * claimed here: Cloudflare Workers cannot detect stream disconnection
+ * (confirmed empirically), so "read for exactly Ns" is not measurable.
+ * `read`/`likely_read` carry real evidence; `not_verifiable` means we saw
+ * only automated activity (prefetch/scanner), never a guess dressed up as
+ * a number.
+ */
+export type ReadConfidence = 'read' | 'likely_read' | 'glanced' | 'not_verifiable';
+
 export interface RawFetchEvent {
   messageId: string;
   kind: EventKind;
@@ -91,6 +105,16 @@ export interface MessageSummary {
   clickCount: number;
   firstOpenedAt: string | null;
   lastOpenedAt: string | null;
+  /**
+   * null = no read-signal data yet (message not opened/clicked, nothing to
+   * judge). Never null once openCount > 0 or machine-only activity was seen
+   * — see computeReadSignal in apps/backend/src/db/client.ts.
+   */
+  readConfidence: ReadConfidence | null;
+  /** Proven lower bound only (open->click gap), never an estimate of true dwell time. Null when not derivable. */
+  minEngagedSeconds: number | null;
+  /** Human-readable justification shown in the dashboard — the evidence IS the product (Track E, "never fabricate"). */
+  readEvidence: string | null;
 }
 
 export interface MessageListResponse {

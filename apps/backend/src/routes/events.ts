@@ -21,7 +21,15 @@ eventsRoute.get('/v1/messages', async (c) => {
   const stats = await getVerdictStatsForMessages(db, rows.map((row) => row.id));
   const response: MessageListResponse = {
     messages: rows.map((row) => {
-      const rowStats = stats.get(row.id) ?? { openCount: 0, clickCount: 0, firstOpenedAt: null, lastOpenedAt: null };
+      const rowStats = stats.get(row.id) ?? {
+        openCount: 0,
+        clickCount: 0,
+        firstOpenedAt: null,
+        lastOpenedAt: null,
+        readConfidence: null,
+        minEngagedSeconds: null,
+        readEvidence: null,
+      };
       return { msgId: row.id, subject: row.subject, recipient: row.recipient, status: row.status, sentAt: row.sent_at, ...rowStats };
     }),
     nextOffset,

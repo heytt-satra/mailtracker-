@@ -52,8 +52,9 @@
       .detail-meta { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.85rem; font-size: 0.82rem; }
       .msg-id { font-family: ui-monospace, monospace; background: white; border: 1px solid var(--border); border-radius: 4px; padding: 0.15rem 0.45rem; color: var(--muted); }
       .copy-btn { font-size: 0.75rem; padding: 0.15rem 0.5rem; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; background: white; }
-      .detail-stats { display: flex; gap: 1.25rem; margin-bottom: 1rem; font-size: 0.82rem; color: var(--muted); }
+      .detail-stats { display: flex; gap: 1.25rem; margin-bottom: 1rem; font-size: 0.82rem; color: var(--muted); flex-wrap: wrap; }
       .detail-stats strong { color: var(--ink); }
+      .read-evidence { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.82rem; color: var(--muted); }
 
       .event { padding: 0.5rem 0; border-bottom: 1px dotted var(--border); font-size: 0.84rem; }
       .event:last-child { border-bottom: none; }
@@ -86,7 +87,7 @@
 
       <table id="messageTable">
         <thead>
-          <tr><th>Status</th><th>Recipient</th><th>Sent</th><th>Opens</th><th>Clicks</th></tr>
+          <tr><th>Status</th><th>Read confidence</th><th>Recipient</th><th>Sent</th><th>Opens</th><th>Clicks</th></tr>
         </thead>
         <tbody id="messageTableBody"></tbody>
       </table>

@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { AsnIntel, EventKind, IntelCategory, MessageStatus, Verdict } from '@mailtrack/shared';
 import type { Env } from '../types';
+import { computeReadSignal, type ReadSignal } from '../read-signal';
 
 export function getSupabase(env: Env): SupabaseClient {
   return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, {
@@ -106,7 +107,7 @@ export async function listMessagesForUser(
   return { rows, nextOffset: rows.length === LIST_PAGE_SIZE ? offset + LIST_PAGE_SIZE : null };
 }
 
-export interface VerdictStats {
+export interface VerdictStats extends ReadSignal {
   openCount: number;
   clickCount: number;
   firstOpenedAt: string | null;
@@ -114,12 +115,18 @@ export interface VerdictStats {
 }
 
 /**
- * Aggregated per-message open/click counts for a page of messages. Supabase's
- * fluent query builder has no GROUP BY, and this doesn't need a Postgres
- * function (unlike classify_ip_category, which runs on the pixel/click hot
- * path) — it's a bounded read (one page of messages at a time, LIST_PAGE_SIZE
- * = 50) on a dashboard endpoint, so aggregating the raw verdict rows in JS is
- * simpler than adding another SQL function for a one-off admin-page query.
+ * Aggregated per-message open/click counts, plus the Read Confidence verdict
+ * (ADR-18), for a page of messages. Supabase's fluent query builder has no
+ * GROUP BY, and this doesn't need a Postgres function (unlike
+ * classify_ip_category, which runs on the pixel/click hot path) — it's a
+ * bounded read (one page of messages at a time, LIST_PAGE_SIZE = 50) on a
+ * dashboard endpoint, so aggregating the raw verdict rows in JS is simpler
+ * than adding another SQL function for a one-off admin-page query.
+ *
+ * Fetches ALL verdict kinds (not just verified_open/verified_click) because
+ * computeReadSignal needs machine_suspect/not_verifiable rows too, to tell
+ * "auto-only activity seen" apart from "nothing happened yet" — see
+ * read-signal.ts.
  */
 export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds: string[]): Promise<Map<string, VerdictStats>> {
   const stats = new Map<string, VerdictStats>();
@@ -129,12 +136,21 @@ export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds:
     .from('verdicts')
     .select('message_id, verdict, created_at')
     .in('message_id', messageIds)
-    .in('verdict', ['verified_open', 'verified_click'])
     .order('created_at', { ascending: true });
   if (error) throw error;
 
+  const eventsByMessage = new Map<string, { verdict: Verdict; createdAt: string }[]>();
+
   for (const row of data ?? []) {
-    const entry = stats.get(row.message_id) ?? { openCount: 0, clickCount: 0, firstOpenedAt: null, lastOpenedAt: null };
+    const entry = stats.get(row.message_id) ?? {
+      openCount: 0,
+      clickCount: 0,
+      firstOpenedAt: null,
+      lastOpenedAt: null,
+      readConfidence: null,
+      minEngagedSeconds: null,
+      readEvidence: null,
+    };
     if (row.verdict === 'verified_open') {
       entry.openCount++;
       entry.firstOpenedAt ??= row.created_at;
@@ -143,7 +159,17 @@ export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds:
       entry.clickCount++;
     }
     stats.set(row.message_id, entry);
+
+    const events = eventsByMessage.get(row.message_id) ?? [];
+    events.push({ verdict: row.verdict as Verdict, createdAt: row.created_at });
+    eventsByMessage.set(row.message_id, events);
   }
+
+  for (const [messageId, events] of eventsByMessage) {
+    const entry = stats.get(messageId)!;
+    Object.assign(entry, computeReadSignal(events));
+  }
+
   return stats;
 }
 
