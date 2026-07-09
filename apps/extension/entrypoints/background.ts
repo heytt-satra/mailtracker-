@@ -1,3 +1,12 @@
+// InboxSDK's content script asks the background service worker to inject
+// its "page world" bridge script (public/pageWorld.js, copied at build time
+// — see scripts/copy-pageworld.mjs and PLAN.md ADR-12) via a runtime
+// message; this registers the listener that actually performs that
+// injection (chrome.scripting.executeScript world:'MAIN'). Without it,
+// InboxSDK never loads and the compose hook / status chips never run, with
+// no visible error beyond "Couldn't inject pageWorld.js" in Gmail's own
+// console — found live, via a real user's browser, not caught by any test.
+import '@inboxsdk/core/background';
 import { pollEvents } from '../src/api-client';
 import { POLL_INTERVAL_MINUTES } from '../src/config';
 import { getPollCursor, getSettings, setPollCursor } from '../src/storage';

@@ -9,3 +9,4 @@ dist/
 coverage/
 .output/
 .wxt/
+apps/extension/public/pageWorld.js
