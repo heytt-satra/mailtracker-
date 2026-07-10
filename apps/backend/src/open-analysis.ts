@@ -18,8 +18,15 @@
  *    signal honestly rather than present it as confident repeat-engagement.
  */
 
-/** Opens within this window of each other are the same viewing session. 30 min balances "same sitting" against "genuinely came back". */
-export const SESSION_GAP_MS = 30 * 60 * 1000;
+/**
+ * Opens within this window of each other are the same viewing session.
+ * 5 minutes (ADR-22, tuned in ADR-26): long enough to absorb the burst of
+ * pixel fetches Gmail fires for a single open and a quick re-open, short
+ * enough that reopening a few minutes later reads as a genuine separate
+ * visit. The sync-pattern detector below still guards against a mail app
+ * that polls on a regular cadence wider than this.
+ */
+export const SESSION_GAP_MS = 5 * 60 * 1000;
 
 /** Groups sorted-ascending open timestamps into sessions. Input need not be pre-sorted. */
 export function clusterOpenSessions(openTimestamps: string[]): string[][] {

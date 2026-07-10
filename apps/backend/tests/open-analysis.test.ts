@@ -13,24 +13,32 @@ describe('clusterOpenSessions', () => {
     expect(clusterOpenSessions([at(0)])).toHaveLength(1);
   });
 
-  it('opens within the 30-min gap collapse into one session', () => {
-    expect(clusterOpenSessions([at(0), at(10), at(25)])).toHaveLength(1);
+  it('opens within the 5-min gap collapse into one session', () => {
+    // 0, 2, 4 min apart — each consecutive gap <= 5 min, so one sitting.
+    expect(clusterOpenSessions([at(0), at(2), at(4)])).toHaveLength(1);
   });
 
-  it('an open past the 30-min gap starts a new session', () => {
-    const sessions = clusterOpenSessions([at(0), at(10), at(50)]);
+  it('an open past the 5-min gap starts a new session', () => {
+    const sessions = clusterOpenSessions([at(0), at(2), at(20)]);
     expect(sessions).toHaveLength(2);
     expect(sessions[0]).toHaveLength(2);
     expect(sessions[1]).toHaveLength(1);
   });
 
-  it('the real-world example clusters to 3 sessions', () => {
-    // 00:29, 00:44, 00:56, 01:58, 08:55 -> gaps 15,12,62,417 min
-    expect(clusterOpenSessions([at(29), at(44), at(56), at(118), at(535)])).toHaveLength(3);
+  it('a burst of pixel fetches for a single open stays one session', () => {
+    // Gmail fires several fetches seconds apart for one open — must not inflate.
+    const base2 = new Date('2026-01-01T00:00:00.000Z').getTime();
+    const sec = (s: number) => new Date(base2 + s * 1000).toISOString();
+    expect(clusterOpenSessions([sec(0), sec(8), sec(20), sec(45)])).toHaveLength(1);
+  });
+
+  it('reopening a few minutes apart now counts as separate sessions (ADR-26)', () => {
+    // 0, 8, 16 min -> each gap > 5 min -> three genuine visits.
+    expect(clusterOpenSessions([at(0), at(8), at(16)])).toHaveLength(3);
   });
 
   it('is order-independent (sorts input first)', () => {
-    expect(clusterOpenSessions([at(50), at(0), at(10)])).toHaveLength(2);
+    expect(clusterOpenSessions([at(20), at(0), at(2)])).toHaveLength(2);
   });
 });
 
@@ -46,7 +54,8 @@ describe('detectSyncPattern', () => {
   });
 
   it('does NOT flag regular opens that are all within the session gap (one sitting, not a polling cadence)', () => {
-    expect(detectSyncPattern([at(0), at(5), at(10), at(15)]).suspect).toBe(false);
+    // 2-min intervals, comfortably inside the 5-min session gap.
+    expect(detectSyncPattern([at(0), at(2), at(4), at(6)]).suspect).toBe(false);
   });
 
   it('does NOT flag irregular, human-looking intervals', () => {

@@ -41,11 +41,12 @@ describe('computeReadSignal', () => {
     expect(result.readEvidence).toMatch(/single session/i);
   });
 
-  it('the real-world example: opens at 0/15/27/89/516 min -> 3 sessions -> likely_read', () => {
+  it('opens spread minutes apart are separate sessions with a 5-min gap (ADR-26) -> likely_read', () => {
     const base = new Date('2026-01-01T00:00:00.000Z').getTime();
     const at = (min: number) => new Date(base + min * 60000).toISOString();
+    // 0, 15, 27, 89, 516 min -> every gap > 5 min -> five distinct sessions
     const result = computeReadSignal([0, 15, 27, 89, 516].map((m) => ({ verdict: 'verified_open' as const, createdAt: at(m) })));
-    expect(result.sessionCount).toBe(3); // {0,15,27} {89} {516}
+    expect(result.sessionCount).toBe(5);
     expect(result.readConfidence).toBe('likely_read');
   });
 
