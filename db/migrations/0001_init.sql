@@ -34,15 +34,22 @@ create table messages (
   -- — see db/migrations/0002_add_recipient.sql for the live-DB migration.
   recipient text,
   sent_at timestamptz not null default now(),
+  -- 'replied' (ADR-21) is the top of the escalate-only ladder — see
+  -- classifier/escalation.ts. db/migrations/0005_add_reply_detection.sql is
+  -- the live-DB migration that widened this constraint.
   status text not null default 'sent'
-    check (status in ('sent','delivered','opened','clicked','not_verifiable')),
+    check (status in ('sent','delivered','opened','clicked','replied','not_verifiable')),
   status_updated_at timestamptz not null default now(),
   -- ADR-20: orthogonal to status above, deliberately not part of the
   -- escalate-only ladder — a bounce is discovered proof the message never
   -- arrived at all, not increased confidence of engagement. See
   -- db/migrations/0004_add_bounce_detection.sql for the live-DB migration.
   bounce_detected_at timestamptz,
-  bounce_reason text
+  bounce_reason text,
+  -- ADR-21: set when the recipient replies in the tracked thread. Distinct
+  -- from status='replied' (which this drives) so the exact detection time is
+  -- retained. See db/migrations/0005_add_reply_detection.sql.
+  reply_detected_at timestamptz
 );
 create index idx_messages_pixel_token on messages(pixel_token);
 create index idx_messages_user_id on messages(user_id);

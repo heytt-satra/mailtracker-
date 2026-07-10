@@ -8,6 +8,7 @@ import { clickRoute } from './routes/click';
 import { eventsRoute } from './routes/events';
 import { authRoute } from './routes/auth';
 import { bouncesRoute } from './routes/bounces';
+import { repliesRoute } from './routes/replies';
 import { getSupabase } from './db/client';
 import { runClassifierSweep } from './classifier/sweep';
 import { refreshAppleRelayRanges } from './classifier/intel-refresh';
@@ -31,6 +32,7 @@ app.route('/', beaconRoute);
 app.route('/', clickRoute);
 app.route('/', eventsRoute);
 app.route('/', bouncesRoute);
+app.route('/', repliesRoute);
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

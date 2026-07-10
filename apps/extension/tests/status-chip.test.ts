@@ -20,10 +20,15 @@ describe('describeStatus', () => {
   });
 
   it('produces a distinct color per status', () => {
-    const statuses = ['sent', 'delivered', 'opened', 'clicked', 'not_verifiable'] as const;
+    const statuses = ['sent', 'delivered', 'opened', 'clicked', 'replied', 'not_verifiable'] as const;
     const colors = new Set(statuses.map((s) => describeStatus(s).color));
-    // sent/delivered/not_verifiable intentionally share the neutral color; opened and clicked are distinct.
-    expect(colors.size).toBeGreaterThanOrEqual(3);
+    // sent/delivered/not_verifiable intentionally share the neutral color; opened/clicked/replied are distinct.
+    expect(colors.size).toBeGreaterThanOrEqual(4);
+  });
+
+  it('replied is explicitly labeled the strongest read proof (ADR-21)', () => {
+    expect(describeStatus('replied').tooltip).toMatch(/replied/i);
+    expect(describeStatus('replied').tooltip).toMatch(/read/i);
   });
 });
 

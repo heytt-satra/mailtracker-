@@ -3,9 +3,13 @@ import {
   getMsgIdForGmailMessage,
   getPollCursor,
   getSettings,
+  getTrackedThread,
   hasReportedBounce,
+  hasReportedReply,
   markBounceReported,
+  markReplyReported,
   recordGmailMessageId,
+  recordThreadForMessage,
   setPollCursor,
   setSettings,
 } from '../src/storage';
@@ -70,5 +74,20 @@ describe('storage', () => {
     await markBounceReported('gmail-bounce-1');
     expect(await hasReportedBounce('gmail-bounce-1')).toBe(true);
     expect(await hasReportedBounce('gmail-bounce-2')).toBe(false); // marking one ID doesn't affect another
+  });
+
+  it('thread map: records and looks up a tracked thread, lowercasing recipient emails for case-insensitive reply matching', async () => {
+    await recordThreadForMessage('thread-1', 'msg-a', ['Recipient@Example.com', ' other@example.com ']);
+    const tracked = await getTrackedThread('thread-1');
+    expect(tracked?.msgId).toBe('msg-a');
+    expect(tracked?.recipientEmails).toEqual(['recipient@example.com', 'other@example.com']);
+    expect(await getTrackedThread('untracked-thread')).toBeNull();
+  });
+
+  it('reply dedup: unreported by default, reported after marking', async () => {
+    expect(await hasReportedReply('gmail-reply-1')).toBe(false);
+    await markReplyReported('gmail-reply-1');
+    expect(await hasReportedReply('gmail-reply-1')).toBe(true);
+    expect(await hasReportedReply('gmail-reply-2')).toBe(false);
   });
 });

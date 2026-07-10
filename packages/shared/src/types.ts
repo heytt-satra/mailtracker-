@@ -1,6 +1,10 @@
 // Shared between apps/backend and apps/extension. No runtime code, types only.
 
-export type MessageStatus = 'sent' | 'delivered' | 'opened' | 'clicked' | 'not_verifiable';
+// 'replied' is the new top of the ladder (ADR-21): a reply is definitive,
+// unfakeable proof the recipient read the message — a background sync can
+// re-render a tracking pixel, but it can never author a reply. Ranks above
+// 'clicked' in classifier/escalation.ts.
+export type MessageStatus = 'sent' | 'delivered' | 'opened' | 'clicked' | 'replied' | 'not_verifiable';
 
 export type EventKind = 'pixel_fetch' | 'link_click';
 
@@ -63,6 +67,27 @@ export interface ReportBounceResponse {
   /** Null when no sent message could be confidently matched to this bounce — an honest "couldn't correlate this" rather than a guess. */
   matchedMsgId: string | null;
   reason: string;
+}
+
+/**
+ * ADR-21. A detected reply from the recipient in a tracked thread. Unlike
+ * bounce correlation, this needs no fuzzy matching: the extension already
+ * knows the exact msgId for the thread (it stored threadId->msgId at send
+ * time), so the reply is reported against a known message directly.
+ */
+export interface ReplyInfo {
+  detectedAt: string;
+}
+
+export interface ReportReplyRequest {
+  /** The tracked message the reply is a response to — resolved client-side from the thread map, not correlated server-side. */
+  msgId: string;
+  /** When the reply was observed in the sender's thread view. */
+  detectedAt: string;
+}
+
+export interface ReportReplyResponse {
+  ok: boolean;
 }
 
 export interface RawFetchEvent {
@@ -174,6 +199,8 @@ export interface MessageSummary {
   depthReached: DepthReached;
   /** ADR-20. Null unless a bounce notification was detected and correlated to this message. */
   bounce: BounceInfo | null;
+  /** ADR-21. Null unless the recipient replied in the tracked thread — definitive proof of reading. */
+  reply: ReplyInfo | null;
 }
 
 export interface MessageListResponse {

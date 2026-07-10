@@ -29,8 +29,12 @@ const SETTINGS_KEY = 'mailtrack:settings';
 const GMAIL_ID_MAP_KEY = 'mailtrack:gmailIdToMsgId';
 const POLL_CURSOR_KEY = 'mailtrack:pollCursor';
 const REPORTED_BOUNCES_KEY = 'mailtrack:reportedBounceMessageIds';
-/** Bounded so this can't grow forever in chrome.storage.local — only needs to dedupe within roughly one Gmail session. */
+const THREAD_MAP_KEY = 'mailtrack:threadToTrackedMessage';
+const REPORTED_REPLIES_KEY = 'mailtrack:reportedReplyMessageIds';
+/** Bounded so these can't grow forever in chrome.storage.local — only need to dedupe within roughly one Gmail session. */
 const MAX_TRACKED_REPORTED_BOUNCES = 500;
+const MAX_TRACKED_REPLIES = 500;
+const MAX_TRACKED_THREADS = 500;
 
 export async function getSettings(): Promise<MailTrackSettings> {
   const stored = await chrome.storage.local.get(SETTINGS_KEY);
@@ -61,6 +65,49 @@ export async function getMsgIdForGmailMessage(gmailMessageId: string): Promise<s
   const stored = await chrome.storage.local.get(GMAIL_ID_MAP_KEY);
   const map: Record<string, string> = stored[GMAIL_ID_MAP_KEY] ?? {};
   return map[gmailMessageId] ?? null;
+}
+
+/**
+ * ADR-21. Records which tracked message (and its recipient emails) a Gmail
+ * thread belongs to, captured at send time. Reply detection reads this to
+ * know (a) whether an inbound message is in a thread we care about, and (b)
+ * whether its sender is the original recipient (a reply) vs. our own
+ * follow-up. Recipient emails are stored lowercased for case-insensitive
+ * matching. Bounded to the most-recent MAX_TRACKED_THREADS entries.
+ */
+export interface TrackedThread {
+  msgId: string;
+  recipientEmails: string[];
+}
+
+export async function recordThreadForMessage(threadId: string, msgId: string, recipientEmails: string[]): Promise<void> {
+  const stored = await chrome.storage.local.get(THREAD_MAP_KEY);
+  const map: Record<string, TrackedThread> = stored[THREAD_MAP_KEY] ?? {};
+  map[threadId] = { msgId, recipientEmails: recipientEmails.map((e) => e.trim().toLowerCase()).filter(Boolean) };
+  const entries = Object.entries(map);
+  const trimmed = entries.length > MAX_TRACKED_THREADS ? Object.fromEntries(entries.slice(-MAX_TRACKED_THREADS)) : map;
+  await chrome.storage.local.set({ [THREAD_MAP_KEY]: trimmed });
+}
+
+export async function getTrackedThread(threadId: string): Promise<TrackedThread | null> {
+  const stored = await chrome.storage.local.get(THREAD_MAP_KEY);
+  const map: Record<string, TrackedThread> = stored[THREAD_MAP_KEY] ?? {};
+  return map[threadId] ?? null;
+}
+
+/** Dedup guard for reply reporting — same reasoning as hasReportedBounce; keyed by the reply message's own Gmail ID. */
+export async function hasReportedReply(replyGmailMessageId: string): Promise<boolean> {
+  const stored = await chrome.storage.local.get(REPORTED_REPLIES_KEY);
+  const ids: string[] = stored[REPORTED_REPLIES_KEY] ?? [];
+  return ids.includes(replyGmailMessageId);
+}
+
+export async function markReplyReported(replyGmailMessageId: string): Promise<void> {
+  const stored = await chrome.storage.local.get(REPORTED_REPLIES_KEY);
+  const ids: string[] = stored[REPORTED_REPLIES_KEY] ?? [];
+  if (ids.includes(replyGmailMessageId)) return;
+  const updated = [...ids, replyGmailMessageId].slice(-MAX_TRACKED_REPLIES);
+  await chrome.storage.local.set({ [REPORTED_REPLIES_KEY]: updated });
 }
 
 /**

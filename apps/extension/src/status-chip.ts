@@ -21,6 +21,8 @@ export function describeStatus(status: MessageStatus): StatusChipDescriptor {
       return { tooltip: 'MailTrack: opened (verified — a human read this)', color: '#1a73e8' };
     case 'clicked':
       return { tooltip: 'MailTrack: link clicked (verified)', color: '#188038' };
+    case 'replied':
+      return { tooltip: 'MailTrack: recipient replied — definitive proof they read it', color: '#0b8043' };
     case 'not_verifiable':
       return { tooltip: "MailTrack: this recipient's platform blocks open verification (e.g. Apple Mail Privacy Protection) — not a bug", color: '#9aa0a6' };
   }

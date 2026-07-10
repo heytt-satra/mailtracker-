@@ -1,7 +1,17 @@
 import * as InboxSDKLoader from '@inboxsdk/core';
 import { COMPOSE_INJECTION_TIMEOUT_MS, INBOXSDK_APP_ID } from './config';
-import { createMessage, getMessageStatus, reportBounce } from './api-client';
-import { getMsgIdForGmailMessage, getSettings, hasReportedBounce, markBounceReported, recordGmailMessageId } from './storage';
+import { createMessage, getMessageStatus, reportBounce, reportReply } from './api-client';
+import {
+  getMsgIdForGmailMessage,
+  getSettings,
+  getTrackedThread,
+  hasReportedBounce,
+  hasReportedReply,
+  markBounceReported,
+  markReplyReported,
+  recordGmailMessageId,
+  recordThreadForMessage,
+} from './storage';
 import { appendDepthBeacons, appendTrackingPixel, extractLinkUrls, rewriteLinks } from './html-injection';
 import { formatRecipients } from './recipient-format';
 import { describeStatus, statusIconDataUrl } from './status-chip';
@@ -13,12 +23,17 @@ export async function startMailTrack(): Promise<void> {
   registerComposeTracking(sdk);
   registerStatusChips(sdk);
   registerBounceDetection(sdk);
+  registerReplyDetection(sdk);
 }
 
 function registerComposeTracking(sdk: InboxSDKInstance): void {
   sdk.Compose.registerComposeViewHandler((composeView) => {
     let injectionAttempted = false;
     let trackedMsgId: string | null = null;
+    // Captured at presending (recipients are final once the user hits send)
+    // so the 'sent' handler can record the thread map for reply detection —
+    // the compose view is gone by then, so getToRecipients() can't be called there.
+    let trackedRecipientEmails: string[] = [];
 
     composeView.on('presending', (event) => {
       // InboxSDK's presending event isn't documented to await async
@@ -29,6 +44,7 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
       // bug must never be able to loop or silently eat the user's email).
       if (injectionAttempted) return;
       injectionAttempted = true;
+      trackedRecipientEmails = composeView.getToRecipients().map((r) => r.emailAddress);
       event.cancel();
 
       injectTrackingThenSend(composeView).then((msgId) => {
@@ -40,6 +56,10 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
       if (!trackedMsgId) return; // tracking wasn't enabled or failed open untracked — nothing to record
       const gmailMessageId = event.getMessageID();
       if (gmailMessageId) recordGmailMessageId(gmailMessageId, trackedMsgId).catch(() => {});
+      // ADR-21: remember which tracked message this thread belongs to, and who
+      // the recipients were, so a later reply from one of them can be detected.
+      const threadId = event.getThreadID();
+      if (threadId) recordThreadForMessage(threadId, trackedMsgId, trackedRecipientEmails).catch(() => {});
     });
   });
 }
@@ -175,6 +195,63 @@ async function handlePossibleBounce(messageView: MessageView): Promise<void> {
     await markBounceReported(gmailMessageId);
   } catch (err) {
     console.error('[MailTrack] failed to report detected bounce:', err);
+    // Deliberately NOT marking as reported on failure — worth retrying on the next render.
+  }
+}
+
+/**
+ * ADR-21. Watches every rendered message for a reply from the recipient in a
+ * thread MailTrack sent to. A reply is the one signal that cannot be produced
+ * by a background sync or an image proxy — it requires a human to author it —
+ * so it's the strongest read-proof the product has. Deliberately reads only
+ * the message's sender and thread ID (never its body text, unlike bounce
+ * detection), so it needs no separate privacy toggle beyond being signed in.
+ */
+function registerReplyDetection(sdk: InboxSDKInstance): void {
+  sdk.Conversations.registerMessageViewHandlerAll((messageView) => {
+    if (messageView.isLoaded()) {
+      handlePossibleReply(messageView).catch(() => {});
+    } else {
+      messageView.on('load', ({ messageView: loaded }) => {
+        handlePossibleReply(loaded).catch(() => {});
+      });
+    }
+  });
+}
+
+async function handlePossibleReply(messageView: MessageView): Promise<void> {
+  const settings = await getSettings();
+  if (!settings.apiKey) return;
+
+  let threadId: string;
+  try {
+    threadId = await messageView.getThreadView().getThreadIDAsync();
+  } catch {
+    return;
+  }
+  const tracked = await getTrackedThread(threadId);
+  if (!tracked) return; // not a thread MailTrack sent to — the vast majority of threads
+
+  let sender;
+  try {
+    sender = messageView.getSender();
+  } catch {
+    return; // not loaded yet; a later render (or the 'load' event) retries
+  }
+  // A reply is a message FROM one of the original recipients. Our own sent
+  // message and follow-ups have our address as sender (never in recipientEmails),
+  // so they're correctly ignored — no need to know our own address separately.
+  const senderEmail = sender.emailAddress.trim().toLowerCase();
+  if (!tracked.recipientEmails.includes(senderEmail)) return;
+
+  const replyGmailMessageId = await messageView.getMessageIDAsync().catch(() => null);
+  if (!replyGmailMessageId || (await hasReportedReply(replyGmailMessageId))) return;
+
+  try {
+    await reportReply(settings.apiKey, { msgId: tracked.msgId, detectedAt: new Date().toISOString() });
+    await markReplyReported(replyGmailMessageId);
+  } catch (err) {
+    console.error('[MailTrack] failed to report detected reply:', err);
     // Deliberately NOT marking as reported on failure — worth retrying on the next render.
   }
 }

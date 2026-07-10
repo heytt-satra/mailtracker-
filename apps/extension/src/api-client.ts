@@ -5,6 +5,8 @@ import type {
   MessageStatusResponse,
   ReportBounceRequest,
   ReportBounceResponse,
+  ReportReplyRequest,
+  ReportReplyResponse,
   TimelineEvent,
 } from '@mailtrack/shared';
 import { MAILTRACK_API_BASE_URL } from './config';
@@ -82,6 +84,11 @@ export function deleteMessage(apiKey: string, msgId: string): Promise<{ deleted:
 /** ADR-20. Called when the inbox watcher (src/bounce-detection.ts + inboxsdk-app.ts) recognizes a bounce notification. */
 export function reportBounce(apiKey: string, body: ReportBounceRequest): Promise<ReportBounceResponse> {
   return request<ReportBounceResponse>('/v1/bounces', apiKey, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** ADR-21. Called when the thread watcher detects a reply from the recipient in a tracked thread. */
+export function reportReply(apiKey: string, body: ReportReplyRequest): Promise<ReportReplyResponse> {
+  return request<ReportReplyResponse>('/v1/replies', apiKey, { method: 'POST', body: JSON.stringify(body) });
 }
 
 /**

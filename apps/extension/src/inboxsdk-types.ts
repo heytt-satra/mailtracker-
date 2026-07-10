@@ -32,20 +32,26 @@ export interface ComposeView {
   on(event: 'sent', handler: (event: SentEvent) => void): void;
 }
 
+export interface ThreadView {
+  /** Confirmed against thread-view.d.ts in the installed package (ADR-21). getThreadID() is deprecated there; the async form is current. */
+  getThreadIDAsync: () => Promise<string>;
+}
+
 export interface MessageView {
   getMessageIDAsync: () => Promise<string>;
   addAttachmentIcon: (descriptor: { iconUrl: string; tooltip: string }) => void;
   /**
-   * ADR-20. Confirmed against the installed package's own type declaration
-   * (node_modules/@inboxsdk/core/src/platform-implementation-js/views/conversations/message-view.d.ts)
-   * rather than assumed from docs — see PLAN.md ADR-20 for why that
-   * verification mattered here.
+   * ADR-20/ADR-21. Confirmed against the installed package's own type
+   * declaration (node_modules/@inboxsdk/core/src/platform-implementation-js/views/conversations/message-view.d.ts
+   * and thread-view.d.ts) rather than assumed from docs — see PLAN.md ADR-20
+   * for why that verification mattered here.
    */
   isLoaded: () => boolean;
   /** @throws if isLoaded() is false — check first, or use the 'load' event below. */
   getSender: () => Contact;
   /** @throws if isLoaded() is false — same caveat as getSender(). */
   getBodyElement: () => HTMLElement;
+  getThreadView: () => ThreadView;
   on(event: 'load', handler: (data: { messageView: MessageView }) => void): void;
 }
 

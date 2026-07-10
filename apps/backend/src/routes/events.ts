@@ -32,7 +32,18 @@ eventsRoute.get('/v1/messages', async (c) => {
         depthReached: null,
       };
       const bounce = row.bounce_detected_at ? { detectedAt: row.bounce_detected_at, reason: row.bounce_reason ?? '' } : null;
-      return { msgId: row.id, subject: row.subject, recipient: row.recipient, status: row.status, sentAt: row.sent_at, ...rowStats, bounce };
+      const reply = row.reply_detected_at ? { detectedAt: row.reply_detected_at } : null;
+      // ADR-21: a reply is definitive proof of reading, so it overrides the
+      // pixel/click-derived read confidence with the strongest possible
+      // verdict and evidence — no sync/proxy ambiguity can produce a reply.
+      const withReply = reply
+        ? {
+            ...rowStats,
+            readConfidence: 'read' as const,
+            readEvidence: `Replied to your email — definitive proof they read it (${reply.detectedAt}).`,
+          }
+        : rowStats;
+      return { msgId: row.id, subject: row.subject, recipient: row.recipient, status: row.status, sentAt: row.sent_at, ...withReply, bounce, reply };
     }),
     nextOffset,
   };

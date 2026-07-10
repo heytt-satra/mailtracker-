@@ -79,6 +79,13 @@ describe('unit: escalation ladder', () => {
   it('not_verifiable can still escalate to opened later', () => {
     expect(nextStatus('not_verifiable', 'verified_open')).toBe('opened');
   });
+  it('replied is the top rank — a later pixel/click verdict never downgrades a replied message (ADR-21)', () => {
+    // Reply escalation is applied directly (markMessageReplied), not via a verdict;
+    // what matters here is that once 'replied', ordinary verdict-driven escalation can't walk it back.
+    expect(nextStatus('replied', 'verified_open')).toBe('replied');
+    expect(nextStatus('replied', 'verified_click')).toBe('replied');
+    expect(nextStatus('replied', 'machine_suspect')).toBe('replied');
+  });
   it('maps verdicts to their canonical status', () => {
     expect(verdictToStatus('verified_click')).toBe('clicked');
     expect(verdictToStatus('verified_open')).toBe('opened');

@@ -89,6 +89,7 @@ export interface MessageSummaryRow {
   sent_at: string;
   bounce_detected_at: string | null;
   bounce_reason: string | null;
+  reply_detected_at: string | null;
 }
 
 const LIST_PAGE_SIZE = 50;
@@ -101,7 +102,7 @@ export async function listMessagesForUser(
 ): Promise<{ rows: MessageSummaryRow[]; nextOffset: number | null }> {
   const { data, error } = await db
     .from('messages')
-    .select('id, subject, recipient, status, sent_at, bounce_detected_at, bounce_reason')
+    .select('id, subject, recipient, status, sent_at, bounce_detected_at, bounce_reason, reply_detected_at')
     .eq('user_id', userId)
     .order('sent_at', { ascending: false })
     .range(offset, offset + LIST_PAGE_SIZE - 1);
@@ -134,6 +135,21 @@ export async function getBounceCandidateMessages(
 
 export async function markMessageBounced(db: SupabaseClient, messageId: string, params: { detectedAt: string; reason: string }): Promise<void> {
   const { error } = await db.from('messages').update({ bounce_detected_at: params.detectedAt, bounce_reason: params.reason }).eq('id', messageId);
+  if (error) throw error;
+}
+
+/**
+ * ADR-21. Records a reply and escalates status to 'replied' — the top of the
+ * ladder, so this always wins the escalate-only guard, but it's applied via
+ * the same status field rather than a side channel so the dashboard's status
+ * badge and the read-confidence override stay in sync. Idempotent: reporting
+ * the same reply twice just re-writes the same values.
+ */
+export async function markMessageReplied(db: SupabaseClient, messageId: string, params: { detectedAt: string }): Promise<void> {
+  const { error } = await db
+    .from('messages')
+    .update({ reply_detected_at: params.detectedAt, status: 'replied', status_updated_at: new Date().toISOString() })
+    .eq('id', messageId);
   if (error) throw error;
 }
 
