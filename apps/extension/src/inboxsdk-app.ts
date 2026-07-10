@@ -222,19 +222,19 @@ async function handlePossibleReply(messageView: MessageView): Promise<void> {
   const settings = await getSettings();
   if (!settings.apiKey) return;
 
+  // ADR-27: info-level (not debug, which Chrome hides) so the whole path is
+  // visible during diagnosis. Fires for every rendered message — filter the
+  // console by "MailTrack reply".
   let threadId: string;
   try {
     threadId = await messageView.getThreadView().getThreadIDAsync();
   } catch (err) {
-    console.debug('[MailTrack reply] could not get thread id for a rendered message', err);
+    console.info('[MailTrack reply] a message rendered but its thread id was unavailable', err);
     return;
   }
   const tracked = await getTrackedThread(threadId);
   if (!tracked) {
-    // Loud on purpose (ADR-27): the single most likely failure is the viewed
-    // thread id not matching what was stored at send time. Logging every
-    // lookup makes that visible instead of a silent miss.
-    console.debug('[MailTrack reply] rendered message in untracked thread (no reply match):', threadId);
+    console.info('[MailTrack reply] rendered message in thread', threadId, '— not a tracked thread, ignoring');
     return;
   }
 
@@ -242,7 +242,7 @@ async function handlePossibleReply(messageView: MessageView): Promise<void> {
   try {
     sender = messageView.getSender();
   } catch (err) {
-    console.debug('[MailTrack reply] tracked thread but sender not loaded yet; will retry on next render', err);
+    console.info('[MailTrack reply] tracked thread', threadId, 'but sender not loaded yet; will retry', err);
     return; // not loaded yet; a later render (or the 'load' event) retries
   }
   // A reply is a message FROM one of the original recipients. Our own sent
