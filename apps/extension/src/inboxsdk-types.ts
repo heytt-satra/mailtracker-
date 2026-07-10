@@ -12,8 +12,14 @@ export interface PresendingEvent {
 }
 
 export interface SentEvent {
-  getThreadID: () => string;
-  getMessageID: () => string;
+  // Both are ASYNC in InboxSDK — confirmed against the installed package's
+  // own compose-view.d.ts (`sent(data: { getMessageID(): Promise<string>;
+  // getThreadID(): Promise<string> })`). The original scaffold declared these
+  // as sync `() => string` and called them synchronously, so a Promise was
+  // stored as the map key ("[object Promise]") — silently breaking the Gmail
+  // status chip's id lookup and (later) reply-thread correlation (ADR-25).
+  getThreadID: () => Promise<string>;
+  getMessageID: () => Promise<string>;
 }
 
 /** Confirmed shape via InboxSDK's common-data-types docs: name may be empty, emailAddress always present. */

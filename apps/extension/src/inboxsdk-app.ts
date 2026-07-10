@@ -9,9 +9,8 @@ import {
   hasReportedReply,
   markBounceReported,
   markReplyReported,
-  recordGmailMessageId,
-  recordThreadForMessage,
 } from './storage';
+import { recordSentMessage } from './sent-recording';
 import { appendDepthBeacons, appendTrackingPixel, extractLinkUrls, rewriteLinks } from './html-injection';
 import { formatRecipients } from './recipient-format';
 import { describeStatus, statusIconDataUrl } from './status-chip';
@@ -53,13 +52,12 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
     });
 
     composeView.on('sent', (event) => {
+      // ADR-25: getMessageID()/getThreadID() are async (Promise<string>) —
+      // recordSentMessage awaits them. Doing it synchronously (the original
+      // bug) stored a Promise as the map key and silently broke the status
+      // chip and reply-thread correlation.
       if (!trackedMsgId) return; // tracking wasn't enabled or failed open untracked — nothing to record
-      const gmailMessageId = event.getMessageID();
-      if (gmailMessageId) recordGmailMessageId(gmailMessageId, trackedMsgId).catch(() => {});
-      // ADR-21: remember which tracked message this thread belongs to, and who
-      // the recipients were, so a later reply from one of them can be detected.
-      const threadId = event.getThreadID();
-      if (threadId) recordThreadForMessage(threadId, trackedMsgId, trackedRecipientEmails).catch(() => {});
+      recordSentMessage(event, trackedMsgId, trackedRecipientEmails).catch(() => {});
     });
   });
 }
