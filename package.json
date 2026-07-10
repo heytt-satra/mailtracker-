@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "test": "npm run test --workspace=apps/backend",
-    "dev:backend": "npm run dev --workspace=apps/backend"
+    "dev:backend": "npm run dev --workspace=apps/backend",
+    "deploy": "npm run deploy --workspace=apps/backend"
   }
 }
