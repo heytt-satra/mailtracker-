@@ -30,6 +30,8 @@ eventsRoute.get('/v1/messages', async (c) => {
         minEngagedSeconds: null,
         readEvidence: null,
         depthReached: null,
+        sessionCount: null,
+        syncSuspect: false,
       };
       const bounce = row.bounce_detected_at ? { detectedAt: row.bounce_detected_at, reason: row.bounce_reason ?? '' } : null;
       const reply = row.reply_detected_at ? { detectedAt: row.reply_detected_at } : null;

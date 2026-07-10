@@ -199,6 +199,8 @@ export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds:
       minEngagedSeconds: null,
       readEvidence: null,
       depthReached: null,
+      sessionCount: null,
+      syncSuspect: false,
     };
     if (row.verdict === 'verified_open') {
       entry.openCount++;

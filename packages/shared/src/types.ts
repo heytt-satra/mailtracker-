@@ -197,6 +197,10 @@ export interface MessageSummary {
   readEvidence: string | null;
   /** ADR-19. Only ever set for messages long enough to have generated depth beacons in the first place. */
   depthReached: DepthReached;
+  /** ADR-22. Distinct viewing occasions (rapid re-fetches collapsed) — the honest "how many times opened", not raw openCount. Null if never opened. */
+  sessionCount: number | null;
+  /** ADR-22. True when repeat opens look like an automated mail sync rather than a human returning — surfaced as a caveat, never silently reclassified. */
+  syncSuspect: boolean;
   /** ADR-20. Null unless a bounce notification was detected and correlated to this message. */
   bounce: BounceInfo | null;
   /** ADR-21. Null unless the recipient replied in the tracked thread — definitive proof of reading. */

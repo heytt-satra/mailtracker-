@@ -238,9 +238,15 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
 
   const stats = document.createElement('div');
   stats.className = 'detail-stats';
+  // ADR-22: show distinct viewing sessions alongside raw opens — "5 opens
+  // across 3 sessions" is the honest answer to "how many times did they open it".
+  const opensLabel =
+    message.sessionCount && message.sessionCount !== message.openCount
+      ? `<span>Opened <strong>${message.openCount}</strong> time${message.openCount === 1 ? '' : 's'} across <strong>${message.sessionCount}</strong> session${message.sessionCount === 1 ? '' : 's'}</span>`
+      : `<span>Opened <strong>${message.openCount}</strong> time${message.openCount === 1 ? '' : 's'}</span>`;
   stats.innerHTML = `
     ${message.subject ? `<span>Subject <strong>${escapeHtml(message.subject)}</strong></span>` : ''}
-    <span>Opened <strong>${message.openCount}</strong> time${message.openCount === 1 ? '' : 's'}</span>
+    ${opensLabel}
     <span>Clicked <strong>${message.clickCount}</strong> time${message.clickCount === 1 ? '' : 's'}</span>
     ${message.firstOpenedAt ? `<span>First opened <strong>${formatSentAt(message.firstOpenedAt)}</strong></span>` : ''}
     ${message.lastOpenedAt && message.lastOpenedAt !== message.firstOpenedAt ? `<span>Last opened <strong>${formatSentAt(message.lastOpenedAt)}</strong></span>` : ''}
