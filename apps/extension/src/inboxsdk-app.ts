@@ -56,6 +56,7 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
       // recordSentMessage awaits them. Doing it synchronously (the original
       // bug) stored a Promise as the map key and silently broke the status
       // chip and reply-thread correlation.
+      console.info('[MailTrack] compose "sent" event fired; trackedMsgId =', trackedMsgId);
       if (!trackedMsgId) return; // tracking wasn't enabled or failed open untracked — nothing to record
       recordSentMessage(event, trackedMsgId, trackedRecipientEmails).catch(() => {});
     });
@@ -224,23 +225,39 @@ async function handlePossibleReply(messageView: MessageView): Promise<void> {
   let threadId: string;
   try {
     threadId = await messageView.getThreadView().getThreadIDAsync();
-  } catch {
+  } catch (err) {
+    console.debug('[MailTrack reply] could not get thread id for a rendered message', err);
     return;
   }
   const tracked = await getTrackedThread(threadId);
-  if (!tracked) return; // not a thread MailTrack sent to — the vast majority of threads
+  if (!tracked) {
+    // Loud on purpose (ADR-27): the single most likely failure is the viewed
+    // thread id not matching what was stored at send time. Logging every
+    // lookup makes that visible instead of a silent miss.
+    console.debug('[MailTrack reply] rendered message in untracked thread (no reply match):', threadId);
+    return;
+  }
 
   let sender;
   try {
     sender = messageView.getSender();
-  } catch {
+  } catch (err) {
+    console.debug('[MailTrack reply] tracked thread but sender not loaded yet; will retry on next render', err);
     return; // not loaded yet; a later render (or the 'load' event) retries
   }
   // A reply is a message FROM one of the original recipients. Our own sent
   // message and follow-ups have our address as sender (never in recipientEmails),
   // so they're correctly ignored — no need to know our own address separately.
   const senderEmail = sender.emailAddress.trim().toLowerCase();
-  if (!tracked.recipientEmails.includes(senderEmail)) return;
+  const isReply = tracked.recipientEmails.includes(senderEmail);
+  console.info('[MailTrack reply] tracked thread rendered:', {
+    threadId,
+    msgId: tracked.msgId,
+    messageSender: senderEmail,
+    trackedRecipients: tracked.recipientEmails,
+    countsAsReply: isReply,
+  });
+  if (!isReply) return; // this rendered message is our own sent message, not the recipient's reply
 
   const replyGmailMessageId = await messageView.getMessageIDAsync().catch(() => null);
   if (!replyGmailMessageId || (await hasReportedReply(replyGmailMessageId))) return;
@@ -248,8 +265,9 @@ async function handlePossibleReply(messageView: MessageView): Promise<void> {
   try {
     await reportReply(settings.apiKey, { msgId: tracked.msgId, detectedAt: new Date().toISOString() });
     await markReplyReported(replyGmailMessageId);
+    console.info('[MailTrack reply] ✓ reported reply for message', tracked.msgId);
   } catch (err) {
-    console.error('[MailTrack] failed to report detected reply:', err);
+    console.error('[MailTrack reply] failed to report detected reply:', err);
     // Deliberately NOT marking as reported on failure — worth retrying on the next render.
   }
 }

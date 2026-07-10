@@ -19,6 +19,10 @@ export async function recordSentMessage(event: SentEvent, msgId: string, recipie
   }
   try {
     const threadId = await event.getThreadID();
+    // Loud on purpose (ADR-27): reply detection later looks this thread id up,
+    // and every failure in that path is a silent return — so the one place we
+    // CAN see what was stored, we log it, to make a mismatch diagnosable.
+    console.info('[MailTrack] recorded sent thread for reply detection:', { threadId, msgId, recipientEmails });
     if (threadId) await recordThreadForMessage(threadId, msgId, recipientEmails);
   } catch (err) {
     console.warn('[MailTrack] could not record thread for reply detection:', err);
