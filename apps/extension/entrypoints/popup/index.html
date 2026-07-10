@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MailTrack</title>
+    <link rel="stylesheet" href="theme.css" />
+    <style>
+      body { width: 360px; max-height: 560px; overflow-y: auto; }
+      .pop-head { display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border-soft); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+      .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--border); background: transparent; color: var(--ink-soft); cursor: pointer; }
+      .icon-btn:hover { background: var(--bg-soft); color: var(--ink); }
+      .icon-btn svg { width: 16px; height: 16px; }
+
+      .loading, .signed-out, .empty { padding: 1.5rem 1.15rem; }
+      .signed-out h2 { font-size: 0.95rem; margin: 0 0 0.25rem; }
+      .signed-out p { font-size: 0.83rem; color: var(--ink-soft); margin: 0 0 1rem; }
+      .field { margin-bottom: 0.6rem; }
+      .field input { width: 100%; padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-soft); color: var(--ink); font-size: 0.88rem; }
+      .field input:focus { outline: none; border-color: var(--brand); background: var(--bg); }
+      .auth-actions { display: flex; gap: 0.5rem; margin-top: 0.25rem; }
+      .auth-actions .mt-btn { flex: 1; }
+      #authMsg { font-size: 0.8rem; min-height: 1.1em; margin-top: 0.55rem; color: var(--green); }
+      #authMsg[data-error] { color: var(--red); }
+
+      .summary-strip { display: flex; padding: 0.7rem 1rem; gap: 0.5rem; border-bottom: 1px solid var(--border-soft); }
+      .stat-chip { flex: 1; background: var(--bg-soft); border-radius: var(--radius-sm); padding: 0.5rem 0.6rem; }
+      .stat-chip .n { font-size: 1.2rem; font-weight: 700; line-height: 1; }
+      .stat-chip .l { font-size: 0.68rem; color: var(--ink-soft); margin-top: 0.2rem; text-transform: uppercase; letter-spacing: 0.03em; }
+
+      .list-head { display: flex; justify-content: space-between; align-items: center; padding: 0.7rem 1rem 0.35rem; }
+      .list-head .t { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); font-weight: 600; }
+      .live { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; color: var(--ink-soft); }
+      .live .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+      @media (prefers-reduced-motion: reduce) { .live .pulse { animation: none; } }
+
+      ul.msgs { list-style: none; margin: 0; padding: 0 0.5rem 0.5rem; }
+      .msg { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.5rem; border-radius: var(--radius-sm); }
+      .msg:hover { background: var(--bg-soft); }
+      .msg .who { flex: 1; min-width: 0; }
+      .msg .who .r { font-size: 0.85rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .msg .who .meta { font-size: 0.73rem; color: var(--ink-faint); margin-top: 0.1rem; }
+      .msg .counts { font-size: 0.72rem; color: var(--ink-soft); text-align: right; white-space: nowrap; }
+
+      .pop-foot { display: flex; gap: 0.5rem; padding: 0.7rem 1rem 0.85rem; border-top: 1px solid var(--border-soft); position: sticky; bottom: 0; background: var(--bg); }
+      .pop-foot .mt-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }
+      .pop-foot svg { width: 14px; height: 14px; }
+
+      .toggle-inline { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border-soft); font-size: 0.83rem; }
+      .switch { position: relative; width: 34px; height: 20px; }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .slider { position: absolute; inset: 0; background: var(--border); border-radius: 999px; cursor: pointer; transition: 0.15s; }
+      .slider::before { content: ""; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.15s; }
+      .switch input:checked + .slider { background: var(--brand); }
+      .switch input:checked + .slider::before { transform: translateX(14px); }
+      .switch input:focus-visible + .slider { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="pop-head">
+      <div class="mt-header">
+        <img src="./logo.svg" alt="" />
+        <span class="wordmark">Mail<span>Track</span></span>
+      </div>
+      <button class="icon-btn" id="openOptions" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+
+    <div class="loading" id="loading">Loading…</div>
+
+    <!-- Signed out -->
+    <div class="signed-out hidden" id="signedOut">
+      <h2>Sign in to MailTrack</h2>
+      <p>Track verified opens, clicks, and replies — never a false read from an automated fetch.</p>
+      <div class="field"><input type="email" id="email" placeholder="Email" autocomplete="email" /></div>
+      <div class="field"><input type="password" id="password" placeholder="Password" autocomplete="current-password" minlength="6" /></div>
+      <div class="auth-actions">
+        <button class="mt-btn mt-btn-primary" id="logIn">Log in</button>
+        <button class="mt-btn mt-btn-ghost" id="signUp">Sign up</button>
+      </div>
+      <div id="authMsg" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- Signed in -->
+    <div class="hidden" id="signedIn">
+      <div class="toggle-inline">
+        <span>Track new emails automatically</span>
+        <label class="switch"><input type="checkbox" id="trackingToggle" /><span class="slider"></span></label>
+      </div>
+
+      <div class="summary-strip">
+        <div class="stat-chip"><div class="n tnum" id="sTotal">0</div><div class="l">Tracked</div></div>
+        <div class="stat-chip"><div class="n tnum" id="sOpened">0</div><div class="l">Opened</div></div>
+        <div class="stat-chip"><div class="n tnum" id="sReplied">0</div><div class="l">Replied</div></div>
+      </div>
+
+      <div class="list-head">
+        <span class="t">Recent</span>
+        <span class="live"><span class="pulse"></span>Live</span>
+      </div>
+      <ul class="msgs" id="msgList"></ul>
+      <div class="empty hidden mt-muted" id="emptyState" style="font-size:0.85rem;">No tracked emails yet. Send one from Gmail and it'll show up here.</div>
+
+      <div class="pop-foot">
+        <button class="mt-btn mt-btn-primary" id="openDashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+          Full dashboard
+        </button>
+      </div>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

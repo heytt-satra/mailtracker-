@@ -3,19 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <title>MailTrack dashboard</title>
+    <link rel="stylesheet" href="theme.css" />
     <style>
-      :root {
-        --ink: #202124;
-        --muted: #5f6368;
-        --border: #e8eaed;
-        --blue: #1a73e8;
-        --green: #188038;
-        --grey: #9aa0a6;
-        --bg-soft: #f8f9fa;
-      }
-      * { box-sizing: border-box; }
-      body { font-family: system-ui, -apple-system, sans-serif; max-width: 880px; margin: 2rem auto; padding: 0 1rem; color: var(--ink); }
-      h1 { font-size: 1.3rem; margin: 0 0 0.25rem; }
+      /* Dashboard-local aliases onto the shared design tokens (theme.css,
+         ADR-24) so this page inherits brand colors + dark mode from one
+         source instead of its old light-only palette. */
+      :root { --muted: var(--ink-soft); --blue: var(--brand); --grey: var(--ink-faint); }
+      body { max-width: 880px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+      .dash-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+      .settings-link { font-size: 0.82rem; color: var(--brand); text-decoration: none; border: 1px solid var(--border); padding: 0.4rem 0.75rem; border-radius: var(--radius-sm); }
+      .settings-link:hover { background: var(--bg-soft); }
+      h1 { font-size: 1.15rem; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
       .subtitle { color: var(--muted); font-size: 0.85rem; margin: 0 0 1.5rem; }
 
       #signedOutNotice { display: none; color: var(--muted); }
@@ -50,8 +48,8 @@
 
       .detail-row td { background: var(--bg-soft); padding: 1rem 1.25rem; }
       .detail-meta { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.85rem; font-size: 0.82rem; }
-      .msg-id { font-family: ui-monospace, monospace; background: white; border: 1px solid var(--border); border-radius: 4px; padding: 0.15rem 0.45rem; color: var(--muted); }
-      .copy-btn { font-size: 0.75rem; padding: 0.15rem 0.5rem; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; background: white; }
+      .msg-id { font-family: ui-monospace, monospace; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.15rem 0.45rem; color: var(--muted); }
+      .copy-btn { font-size: 0.75rem; padding: 0.15rem 0.5rem; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--ink); }
       .detail-stats { display: flex; gap: 1.25rem; margin-bottom: 1rem; font-size: 0.82rem; color: var(--muted); flex-wrap: wrap; }
       .detail-stats strong { color: var(--ink); }
       .read-evidence { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.82rem; color: var(--muted); }
@@ -73,9 +71,16 @@
     </style>
   </head>
   <body>
-    <h1>MailTrack dashboard</h1>
-    <p class="subtitle">Verified opens and clicks only — never a raw pixel fetch.</p>
-    <p id="signedOutNotice">Sign in from the extension's options page first.</p>
+    <div class="dash-header">
+      <div class="mt-header">
+        <img src="logo.svg" alt="" />
+        <span class="wordmark">Mail<span>Track</span></span>
+      </div>
+      <a class="settings-link" href="options.html">Settings &amp; data</a>
+    </div>
+    <h1>Dashboard</h1>
+    <p class="subtitle">Verified opens, clicks, and replies only — never a raw pixel fetch.</p>
+    <p id="signedOutNotice">Open the MailTrack popup from your toolbar to sign in first.</p>
     <p id="loading">Loading…</p>
 
     <div id="content" style="display:none">

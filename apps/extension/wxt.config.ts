@@ -26,9 +26,13 @@ export default defineConfig({
       'http://localhost:8787/*',
       'https://*.supabase.co/*',
     ],
-    // Placeholder 1x1 PNGs (see PLAN.md Known Issues) — real branding/icon
-    // design is deferred to M7; these exist only so the manifest is valid
-    // and notifications have an iconUrl that resolves.
+    // Real branded icons (ADR-24), rendered from assets/logo.svg via
+    // scripts/render-icons.mjs — an envelope + verification check in the
+    // product's own status colors. Replaced the original 1x1 placeholders.
     icons: { 16: 'icon-16.png', 32: 'icon-32.png', 48: 'icon-48.png', 128: 'icon-128.png' },
+    // Clicking the toolbar icon opens the popup — the product's new front
+    // door (ADR-24). Previously the icon opened nothing and the only way in
+    // was right-click > Options > "Open dashboard", a three-step detour.
+    action: { default_popup: 'popup.html', default_title: 'MailTrack' },
   },
 });

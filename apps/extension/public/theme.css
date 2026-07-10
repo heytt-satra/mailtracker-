@@ -1,0 +1,87 @@
+/*
+ * Shared design system for all three extension surfaces (popup, dashboard,
+ * options) — ADR-24. Imported by each so they read as one product rather
+ * than three separately-styled pages. Colors are the product's own status
+ * language: verified-open blue and verified-click green, the same hues the
+ * dashboard badges, the Gmail status chip, and the logo already use.
+ */
+:root {
+  --brand: #1a73e8;
+  --brand-ink: #1557b0;
+  --green: #188038;
+  --amber: #b7791f;
+  --red: #d93025;
+
+  --ink: #202124;
+  --ink-soft: #5f6368;
+  --ink-faint: #80868b;
+  --border: #e4e7ea;
+  --border-soft: #eef0f2;
+  --bg: #ffffff;
+  --bg-soft: #f7f9fb;
+  --bg-raised: #ffffff;
+  --brand-tint: #1a73e814;
+  --shadow-sm: 0 1px 2px rgba(32, 33, 36, 0.06);
+  --shadow-md: 0 4px 16px rgba(32, 33, 36, 0.1);
+  --radius: 10px;
+  --radius-sm: 7px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand: #6ba5f0;
+    --brand-ink: #8ab8f4;
+    --green: #57b96f;
+    --amber: #d9a441;
+    --red: #ef6d5e;
+    --ink: #e8eaed;
+    --ink-soft: #9aa0a6;
+    --ink-faint: #6c7176;
+    --border: #303338;
+    --border-soft: #26282c;
+    --bg: #1a1c1e;
+    --bg-soft: #212326;
+    --bg-raised: #212326;
+    --brand-tint: #6ba5f022;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.4);
+  }
+}
+:root[data-theme="light"] {
+  --brand: #1a73e8; --brand-ink: #1557b0; --green: #188038; --amber: #b7791f; --red: #d93025;
+  --ink: #202124; --ink-soft: #5f6368; --ink-faint: #80868b; --border: #e4e7ea; --border-soft: #eef0f2;
+  --bg: #ffffff; --bg-soft: #f7f9fb; --bg-raised: #ffffff; --brand-tint: #1a73e814;
+  --shadow-sm: 0 1px 2px rgba(32,33,36,0.06); --shadow-md: 0 4px 16px rgba(32,33,36,0.1);
+}
+:root[data-theme="dark"] {
+  --brand: #6ba5f0; --brand-ink: #8ab8f4; --green: #57b96f; --amber: #d9a441; --red: #ef6d5e;
+  --ink: #e8eaed; --ink-soft: #9aa0a6; --ink-faint: #6c7176; --border: #303338; --border-soft: #26282c;
+  --bg: #1a1c1e; --bg-soft: #212326; --bg-raised: #212326; --brand-tint: #6ba5f022;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3); --shadow-md: 0 6px 20px rgba(0,0,0,0.4);
+}
+
+* { box-sizing: border-box; }
+body { font-family: var(--font); color: var(--ink); background: var(--bg); margin: 0; -webkit-font-smoothing: antialiased; }
+
+/* Shared brand header — logo + wordmark, identical across surfaces */
+.mt-header { display: flex; align-items: center; gap: 0.6rem; }
+.mt-header img { width: 26px; height: 26px; border-radius: 6px; }
+.mt-header .wordmark { font-size: 1.02rem; font-weight: 700; letter-spacing: -0.01em; }
+.mt-header .wordmark span { color: var(--brand); }
+
+/* Shared status + read-confidence badges */
+.mt-badge { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.18rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+.mt-badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* Shared buttons */
+.mt-btn { font-family: var(--font); font-size: 0.85rem; font-weight: 500; padding: 0.5rem 0.9rem; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid transparent; transition: background 0.12s, border-color 0.12s; }
+.mt-btn-primary { background: var(--brand); color: #fff; }
+.mt-btn-primary:hover { background: var(--brand-ink); }
+.mt-btn-ghost { background: transparent; border-color: var(--border); color: var(--ink); }
+.mt-btn-ghost:hover { background: var(--bg-soft); }
+.mt-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.mt-muted { color: var(--ink-soft); }
+.tnum { font-variant-numeric: tabular-nums; }

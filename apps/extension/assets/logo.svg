@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!--
+    MailTrack mark (ADR-24): an envelope carrying a verification check.
+    The two brand colors are the product's own status colors — verified-open
+    blue (#1a73e8) and verified-click green (#188038) — so the icon, the
+    dashboard badges, and the Gmail status chip all speak one language.
+    Shapes are deliberately bold/flat so the mark survives 16px rendering.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a73e8"/>
+      <stop offset="1" stop-color="#1557b0"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bg)"/>
+  <!-- envelope body -->
+  <rect x="24" y="40" width="80" height="52" rx="9" fill="#ffffff"/>
+  <!-- envelope flap: drawn as a stroked V so it reads at small sizes -->
+  <path d="M28 46 L64 72 L100 46" fill="none" stroke="#1a73e8" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- verification badge, overlapping the corner like the dashboard's status dot -->
+  <circle cx="95" cy="89" r="24" fill="#188038" stroke="#ffffff" stroke-width="7"/>
+  <path d="M84 89 L92 97 L107 81" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
