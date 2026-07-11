@@ -7,9 +7,9 @@
 // no visible error beyond "Couldn't inject pageWorld.js" in Gmail's own
 // console — found live, via a real user's browser, not caught by any test.
 import '@inboxsdk/core/background';
-import type { PollEventKind } from '@mailtrack/shared';
 import { pollEvents } from '../src/api-client';
 import { POLL_INTERVAL_MINUTES } from '../src/config';
+import { buildNotificationText } from '../src/notification-text';
 import { getPollCursor, getSettings, setPollCursor } from '../src/storage';
 
 const ALARM_NAME = 'mailtrack-poll';
@@ -49,13 +49,6 @@ function ensurePollAlarm(): void {
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: POLL_INTERVAL_MINUTES });
 }
 
-const EVENT_MESSAGE: Record<PollEventKind, string> = {
-  opened: 'Recipient opened your tracked email.',
-  clicked: 'Recipient clicked a link in your tracked email.',
-  replied: 'Recipient replied to your tracked email — definitive proof they read it.',
-  bounced: 'Your tracked email could not be delivered (bounced).',
-};
-
 async function pollAndNotify(): Promise<void> {
   const settings = await getSettings();
   if (!settings.apiKey || !settings.notificationsEnabled) return;
@@ -66,11 +59,12 @@ async function pollAndNotify(): Promise<void> {
   for (const update of updates) {
     // Verdicts only escalate (PLAN.md ADR-5) — the backend never sends a
     // downgrade here, so every update in this list is safe to notify on.
+    const { title, message } = buildNotificationText(update);
     chrome.notifications.create(`mailtrack-${update.msgId}-${update.event}`, {
       type: 'basic',
       iconUrl: chrome.runtime.getURL('icon-128.png'),
-      title: update.event === 'bounced' ? 'MailTrack: bounced' : 'MailTrack: verified',
-      message: EVENT_MESSAGE[update.event],
+      title,
+      message,
       priority: update.event === 'bounced' ? 2 : 1,
     });
   }

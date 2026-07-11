@@ -145,11 +145,15 @@ eventsRoute.get('/v1/events/poll', async (c) => {
   const [statusResult, bounceResult] = await Promise.all([
     db
       .from('messages')
-      .select('id, status, status_updated_at')
+      .select('id, status, status_updated_at, recipient, subject')
       .eq('user_id', userId)
       .gt('status_updated_at', sinceDate.toISOString())
       .in('status', ['opened', 'clicked', 'replied']),
-    db.from('messages').select('id, bounce_detected_at').eq('user_id', userId).gt('bounce_detected_at', sinceDate.toISOString()),
+    db
+      .from('messages')
+      .select('id, bounce_detected_at, recipient, subject')
+      .eq('user_id', userId)
+      .gt('bounce_detected_at', sinceDate.toISOString()),
   ]);
   if (statusResult.error) {
     console.error('[events/poll] statusResult query failed:', statusResult.error);

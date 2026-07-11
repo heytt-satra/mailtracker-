@@ -12,18 +12,18 @@ import type { PollUpdate } from '@mailtrack/shared';
  * own row set, merged here.
  */
 export function buildPollUpdates(
-  statusRows: { id: string; status: string; status_updated_at: string }[],
-  bounceRows: { id: string; bounce_detected_at: string }[],
+  statusRows: { id: string; status: string; status_updated_at: string; recipient: string | null; subject: string | null }[],
+  bounceRows: { id: string; bounce_detected_at: string; recipient: string | null; subject: string | null }[],
 ): PollUpdate[] {
   const updates: PollUpdate[] = [];
 
   for (const row of statusRows) {
     if (row.status === 'opened' || row.status === 'clicked' || row.status === 'replied') {
-      updates.push({ msgId: row.id, event: row.status, occurredAt: row.status_updated_at });
+      updates.push({ msgId: row.id, event: row.status, occurredAt: row.status_updated_at, recipient: row.recipient, subject: row.subject });
     }
   }
   for (const row of bounceRows) {
-    updates.push({ msgId: row.id, event: 'bounced', occurredAt: row.bounce_detected_at });
+    updates.push({ msgId: row.id, event: 'bounced', occurredAt: row.bounce_detected_at, recipient: row.recipient, subject: row.subject });
   }
 
   return updates;

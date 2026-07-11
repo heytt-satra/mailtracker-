@@ -227,6 +227,9 @@ export interface PollUpdate {
   msgId: string;
   event: PollEventKind;
   occurredAt: string;
+  /** Plain-English identifiers so the desktop notification can say WHO and WHAT, not just "an email". Null when never captured (see CreateMessageRequest.recipient/subject). */
+  recipient: string | null;
+  subject: string | null;
 }
 
 export interface EventsPollResponse {
