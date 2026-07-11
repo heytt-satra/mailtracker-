@@ -1,5 +1,6 @@
 import { getMessageTimeline, listMessages } from '../../src/api-client';
 import { formatSentAt, truncateSubject } from '../../src/dashboard-format';
+import { getFollowUpSuggestion } from '../../src/follow-up';
 import { getSettings } from '../../src/storage';
 import { describeStatus } from '../../src/status-chip';
 import { describeReadConfidence } from '../../src/read-confidence-chip';
@@ -18,6 +19,7 @@ const statusFilter = document.getElementById('statusFilter') as HTMLSelectElemen
 const statTotalEl = document.getElementById('statTotal') as HTMLDivElement;
 const statOpenedEl = document.getElementById('statOpened') as HTMLDivElement;
 const statClickedEl = document.getElementById('statClicked') as HTMLDivElement;
+const statFollowUpEl = document.getElementById('statFollowUp') as HTMLDivElement;
 const COLUMN_COUNT = 6;
 const POLL_INTERVAL_MS = 5000;
 const PAGE_SIZE = 50; // must match apps/backend LIST_PAGE_SIZE
@@ -99,6 +101,7 @@ function matchesFilter(message: MessageSummary): boolean {
   if (filter === 'read') return message.readConfidence === 'read';
   if (filter === 'likely_read') return message.readConfidence === 'likely_read';
   if (filter === 'not_verifiable') return message.readConfidence === 'not_verifiable';
+  if (filter === 'needs_followup') return getFollowUpSuggestion(message, Date.now()) !== null;
   return true;
 }
 
@@ -120,9 +123,11 @@ function applyFilter(): void {
 
 function updateSummary(): void {
   const all = [...messagesById.values()];
+  const now = Date.now();
   statTotalEl.textContent = String(all.length);
   statOpenedEl.textContent = String(all.filter((m) => m.openCount > 0).length);
   statClickedEl.textContent = String(all.filter((m) => m.clickCount > 0).length);
+  statFollowUpEl.textContent = String(all.filter((m) => getFollowUpSuggestion(m, now) !== null).length);
 }
 
 function countCell(count: number): HTMLTableCellElement {
@@ -156,6 +161,14 @@ function paintRow(row: HTMLTableRowElement, message: MessageSummary): void {
   identifierCell.innerHTML = '';
   const primary = document.createElement('div');
   primary.textContent = message.recipient || '(no recipient)';
+  const followUp = getFollowUpSuggestion(message, Date.now());
+  if (followUp) {
+    const badge = document.createElement('span');
+    badge.className = 'follow-up-badge';
+    badge.title = followUp.text;
+    badge.textContent = '⏰ Follow up';
+    primary.appendChild(badge);
+  }
   identifierCell.appendChild(primary);
   if (message.subject) {
     const subjectLine = document.createElement('span');
@@ -310,6 +323,14 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
     bounceEvidenceEl.innerHTML = `<span class="badge" style="color:#d93025;background:#d9302533"><span class="dot" style="background:#d93025"></span>Bounced</span> ${escapeHtml(message.bounce.reason)} (detected ${formatSentAt(message.bounce.detectedAt)})`;
   }
 
+  let followUpEl: HTMLDivElement | null = null;
+  const followUpSuggestion = getFollowUpSuggestion(message, Date.now());
+  if (followUpSuggestion) {
+    followUpEl = document.createElement('div');
+    followUpEl.className = 'read-evidence';
+    followUpEl.innerHTML = `<span class="follow-up-badge">⏰ Follow up</span> ${escapeHtml(followUpSuggestion.text)}`;
+  }
+
   const timelineHeader = document.createElement('div');
   timelineHeader.className = 'muted';
   timelineHeader.style.marginBottom = '0.4rem';
@@ -323,6 +344,7 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
     stats,
     ...(bounceEvidenceEl ? [bounceEvidenceEl] : []),
     ...(readEvidenceEl ? [readEvidenceEl] : []),
+    ...(followUpEl ? [followUpEl] : []),
     timelineHeader,
     timelineContainer,
   );

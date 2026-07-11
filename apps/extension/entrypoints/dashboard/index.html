@@ -47,6 +47,7 @@
 
       .identifier { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .identifier .subject-line { display: block; font-size: 0.76rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .follow-up-badge { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.4rem; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; color: #b45309; background: #b4530920; white-space: nowrap; }
       .count { font-variant-numeric: tabular-nums; }
       .count.zero { color: var(--grey); }
       .muted { color: var(--muted); font-size: 0.82rem; }
@@ -94,6 +95,7 @@
         <div class="stat"><div class="value" id="statTotal">0</div><div class="label">Tracked messages</div></div>
         <div class="stat"><div class="value" id="statOpened">0</div><div class="label">Verified opens</div></div>
         <div class="stat"><div class="value" id="statClicked">0</div><div class="label">Link clicks</div></div>
+        <div class="stat"><div class="value" id="statFollowUp">0</div><div class="label">Needs follow-up</div></div>
       </div>
 
       <div class="toolbar">
@@ -107,6 +109,7 @@
             <option value="likely_read">Likely read</option>
             <option value="not_verifiable">Not verifiable</option>
             <option value="bounced">Bounced</option>
+            <option value="needs_followup">Needs follow-up</option>
           </select>
           <button id="refresh">Refresh now</button>
         </div>

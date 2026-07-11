@@ -7,12 +7,23 @@
 // no visible error beyond "Couldn't inject pageWorld.js" in Gmail's own
 // console — found live, via a real user's browser, not caught by any test.
 import '@inboxsdk/core/background';
-import { pollEvents } from '../src/api-client';
+import { listMessages, pollEvents } from '../src/api-client';
 import { POLL_INTERVAL_MINUTES } from '../src/config';
+import { getFollowUpSuggestion } from '../src/follow-up';
 import { buildNotificationText } from '../src/notification-text';
-import { getPollCursor, getSettings, setPollCursor } from '../src/storage';
+import { getLastFollowUpNotifiedDate, getPollCursor, getSettings, setLastFollowUpNotifiedDate, setPollCursor } from '../src/storage';
 
 const ALARM_NAME = 'mailtrack-poll';
+const FOLLOW_UP_ALARM_NAME = 'mailtrack-followup-check';
+// Follow-up staleness only meaningfully changes day to day, unlike real-time
+// opens/clicks — checking every 12h (rather than every POLL_INTERVAL_MINUTES)
+// avoids burning API calls for a signal that can't have changed since the
+// last check, while still catching the day-boundary promptly either way.
+const FOLLOW_UP_CHECK_INTERVAL_MINUTES = 720;
+// Safety cap so a very large tracked-message history can't turn this into an
+// unbounded background loop — matches the same "no silent unbounded work"
+// discipline as the rate limiters elsewhere in this project.
+const MAX_FOLLOW_UP_PAGES = 20;
 
 export default defineBackground(() => {
   // ADR-30: creating the alarm ONLY inside onInstalled was the root cause of
@@ -34,6 +45,10 @@ export default defineBackground(() => {
         // A poll failure must never crash the service worker or surface to
         // the user — it just means notifications are stale until next tick.
       });
+    } else if (alarm.name === FOLLOW_UP_ALARM_NAME) {
+      checkFollowUpsAndNotify().catch(() => {
+        // Same fail-open discipline as pollAndNotify: never crash the worker.
+      });
     }
   });
 
@@ -47,6 +62,7 @@ export default defineBackground(() => {
 
 function ensurePollAlarm(): void {
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: POLL_INTERVAL_MINUTES });
+  chrome.alarms.create(FOLLOW_UP_ALARM_NAME, { periodInMinutes: FOLLOW_UP_CHECK_INTERVAL_MINUTES });
 }
 
 async function pollAndNotify(): Promise<void> {
@@ -70,4 +86,40 @@ async function pollAndNotify(): Promise<void> {
   }
 
   await setPollCursor(polledAt);
+}
+
+/**
+ * Follow-up reminders are computed, not tracked — derived entirely from
+ * status/timestamps GET /v1/messages already returns, no new backend
+ * endpoint (see src/follow-up.ts). Capped to one notification per calendar
+ * day regardless of how often this alarm fires, since staleness only
+ * meaningfully changes day to day and a notification every 12h for the same
+ * unopened emails would just be noise.
+ */
+async function checkFollowUpsAndNotify(): Promise<void> {
+  const settings = await getSettings();
+  if (!settings.apiKey || !settings.notificationsEnabled) return;
+
+  const today = new Date().toISOString().slice(0, 10);
+  if ((await getLastFollowUpNotifiedDate()) === today) return;
+
+  const now = Date.now();
+  let needsFollowUpCount = 0;
+  let offset: number | null = 0;
+  for (let page = 0; page < MAX_FOLLOW_UP_PAGES && offset !== null; page++) {
+    const { messages, nextOffset } = await listMessages(settings.apiKey, offset);
+    needsFollowUpCount += messages.filter((m) => getFollowUpSuggestion(m, now) !== null).length;
+    offset = nextOffset;
+  }
+
+  if (needsFollowUpCount === 0) return;
+
+  chrome.notifications.create(`mailtrack-followup-${today}`, {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icon-128.png'),
+    title: 'MailTrack: follow-ups waiting',
+    message: `${needsFollowUpCount} tracked email${needsFollowUpCount === 1 ? '' : 's'} could use a follow-up — check the dashboard.`,
+    priority: 1,
+  });
+  await setLastFollowUpNotifiedDate(today);
 }

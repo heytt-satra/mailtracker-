@@ -139,3 +139,21 @@ export async function getPollCursor(): Promise<string> {
 export async function setPollCursor(iso: string): Promise<void> {
   await chrome.storage.local.set({ [POLL_CURSOR_KEY]: iso });
 }
+
+/**
+ * Follow-up reminders are a daily-cadence nudge, not a real-time event like
+ * opens/clicks — the alarm that checks for them can fire more than once a
+ * day (self-healing, same as the poll alarm), so this date string is what
+ * actually caps the notification to once per calendar day rather than the
+ * alarm's own period.
+ */
+const LAST_FOLLOW_UP_NOTIFIED_DATE_KEY = 'mailtrack:lastFollowUpNotifiedDate';
+
+export async function getLastFollowUpNotifiedDate(): Promise<string | null> {
+  const stored = await chrome.storage.local.get(LAST_FOLLOW_UP_NOTIFIED_DATE_KEY);
+  return stored[LAST_FOLLOW_UP_NOTIFIED_DATE_KEY] ?? null;
+}
+
+export async function setLastFollowUpNotifiedDate(dateString: string): Promise<void> {
+  await chrome.storage.local.set({ [LAST_FOLLOW_UP_NOTIFIED_DATE_KEY]: dateString });
+}
