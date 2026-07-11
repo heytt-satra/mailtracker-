@@ -97,7 +97,11 @@ create table raw_events (
   classified_at timestamptz,
   -- 'top' for the original pixel, 'mid'/'bottom' for Track B depth beacons
   -- (ADR-19), null for link_click rows (position doesn't apply to a click).
-  beacon_position text check (beacon_position in ('top','mid','bottom'))
+  beacon_position text check (beacon_position in ('top','mid','bottom')),
+  -- ADR-30: which tracked link was actually clicked (the original, real URL —
+  -- not our redirect token), so the timeline can show WHICH link, not just
+  -- "a link". Null for pixel_fetch rows. See db/migrations/0006_add_clicked_url.sql.
+  clicked_url text
 );
 create index idx_raw_events_message_id on raw_events(message_id);
 create index idx_raw_events_occurred_at on raw_events(occurred_at);

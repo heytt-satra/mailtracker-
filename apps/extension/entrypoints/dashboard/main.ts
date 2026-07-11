@@ -10,8 +10,11 @@ const loadingEl = document.getElementById('loading') as HTMLParagraphElement;
 const content = document.getElementById('content') as HTMLDivElement;
 const tbody = document.getElementById('messageTableBody') as HTMLTableSectionElement;
 const emptyState = document.getElementById('emptyState') as HTMLParagraphElement;
+const filteredEmptyState = document.getElementById('filteredEmptyState') as HTMLParagraphElement;
 const loadMoreButton = document.getElementById('loadMore') as HTMLButtonElement;
 const refreshButton = document.getElementById('refresh') as HTMLButtonElement;
+const searchInput = document.getElementById('searchInput') as HTMLInputElement;
+const statusFilter = document.getElementById('statusFilter') as HTMLSelectElement;
 const statTotalEl = document.getElementById('statTotal') as HTMLDivElement;
 const statOpenedEl = document.getElementById('statOpened') as HTMLDivElement;
 const statClickedEl = document.getElementById('statClicked') as HTMLDivElement;
@@ -79,6 +82,40 @@ async function resetAndReload(): Promise<void> {
   rowsById.clear();
   nextOffset = 0;
   await loadPage();
+}
+
+/** Client-side filter over already-loaded rows — no extra API calls, since everything visible is already in messagesById. */
+function matchesFilter(message: MessageSummary): boolean {
+  const query = searchInput.value.trim().toLowerCase();
+  if (query) {
+    const haystack = `${message.recipient ?? ''} ${message.subject ?? ''}`.toLowerCase();
+    if (!haystack.includes(query)) return false;
+  }
+
+  const filter = statusFilter.value;
+  if (!filter) return true;
+  if (filter === 'replied') return message.reply !== null;
+  if (filter === 'bounced') return message.bounce !== null;
+  if (filter === 'read') return message.readConfidence === 'read';
+  if (filter === 'likely_read') return message.readConfidence === 'likely_read';
+  if (filter === 'not_verifiable') return message.readConfidence === 'not_verifiable';
+  return true;
+}
+
+/** Re-applies search/status filtering to every currently-rendered row — called after any render mutation and on every filter-input change. */
+function applyFilter(): void {
+  let visibleCount = 0;
+  for (const [msgId, row] of rowsById) {
+    const message = messagesById.get(msgId);
+    const visible = message ? matchesFilter(message) : false;
+    row.style.display = visible ? '' : 'none';
+    if (!visible) {
+      const detail = expandedRows.get(msgId);
+      if (detail) detail.style.display = 'none';
+    }
+    if (visible) visibleCount++;
+  }
+  filteredEmptyState.style.display = tbody.children.length > 0 && visibleCount === 0 ? '' : 'none';
 }
 
 function updateSummary(): void {
@@ -171,6 +208,7 @@ async function loadPage(): Promise<void> {
 
   emptyState.style.display = tbody.children.length === 0 ? '' : 'none';
   loadMoreButton.style.display = nextOffset !== null ? '' : 'none';
+  applyFilter();
 }
 
 /** Re-fetches every currently-loaded page and updates rows in place — new messages get prepended, existing ones repainted, nothing collapses. */
@@ -200,6 +238,7 @@ async function pollRefresh(): Promise<void> {
 
   updateSummary();
   emptyState.style.display = tbody.children.length === 0 ? '' : 'none';
+  applyFilter();
 }
 
 async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<void> {
@@ -301,7 +340,10 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
       const eventEl = document.createElement('div');
       eventEl.className = event.suppressed ? 'event suppressed' : 'event';
       const kindLabel = event.kind === 'link_click' ? 'Click' : 'Pixel fetch';
-      eventEl.innerHTML = `<span class="verdict">${kindLabel} — ${event.verdict}</span> (${formatSentAt(event.occurredAt)})<br/><span class="reason">${escapeHtml(event.reason)}</span>`;
+      // ADR-30: show WHICH link was clicked, not just "a link" — truncated so a long
+      // tracking-redirect-laden URL doesn't blow out the row.
+      const urlLine = event.clickedUrl ? `<br/><span class="reason clicked-url" title="${escapeHtml(event.clickedUrl)}">→ ${escapeHtml(truncateSubject(event.clickedUrl, 70))}</span>` : '';
+      eventEl.innerHTML = `<span class="verdict">${kindLabel} — ${event.verdict}</span> (${formatSentAt(event.occurredAt)})<br/><span class="reason">${escapeHtml(event.reason)}</span>${urlLine}`;
       timelineContainer.appendChild(eventEl);
     }
   } catch {
@@ -319,5 +361,7 @@ loadMoreButton.addEventListener('click', loadPage);
 refreshButton.addEventListener('click', () => {
   resetAndReload().then(() => startPolling());
 });
+searchInput.addEventListener('input', applyFilter);
+statusFilter.addEventListener('change', applyFilter);
 
 init();

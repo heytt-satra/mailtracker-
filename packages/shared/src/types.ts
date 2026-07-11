@@ -169,6 +169,8 @@ export interface TimelineEvent {
   reason: string;
   /** suppressed events (machine_suspect) are shown greyed out in the UI, not hidden */
   suppressed: boolean;
+  /** ADR-30. The real destination URL for a link_click event — null for pixel_fetch, or if the click predates this field. */
+  clickedUrl: string | null;
 }
 
 /** One row in the dashboard's message list (M5). */

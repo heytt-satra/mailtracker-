@@ -24,12 +24,17 @@
       .stat .value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
       .stat .label { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
 
-      .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+      .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 0.75rem; flex-wrap: wrap; }
       .live-indicator { font-size: 0.78rem; color: var(--muted); display: flex; align-items: center; gap: 0.4rem; }
       .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2s ease-in-out infinite; }
       @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
       #refresh { font-size: 0.82rem; padding: 0.4rem 0.8rem; cursor: pointer; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--ink); }
       #refresh:hover { background: var(--bg-soft); }
+
+      .filter-row { display: flex; gap: 0.5rem; align-items: center; }
+      #searchInput { font-size: 0.82rem; padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--ink); width: 200px; }
+      #statusFilter { font-size: 0.82rem; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--ink); }
+      #filteredEmptyState { display: none; }
 
       table { width: 100%; border-collapse: collapse; }
       th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
@@ -59,6 +64,7 @@
       .event.suppressed { opacity: 0.5; }
       .event .verdict { font-weight: 600; }
       .event .reason { color: var(--muted); }
+      .event .clicked-url { font-family: ui-monospace, monospace; font-size: 0.78rem; word-break: break-all; }
 
       .reliability-legend { border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; font-size: 0.82rem; }
       .reliability-legend summary { cursor: pointer; color: var(--muted); font-weight: 600; }
@@ -92,7 +98,18 @@
 
       <div class="toolbar">
         <span class="live-indicator"><span class="live-dot"></span>Auto-updating every 5s</span>
-        <button id="refresh">Refresh now</button>
+        <div class="filter-row">
+          <input id="searchInput" type="search" placeholder="Search recipient or subject…" />
+          <select id="statusFilter">
+            <option value="">All statuses</option>
+            <option value="replied">Replied</option>
+            <option value="read">Read</option>
+            <option value="likely_read">Likely read</option>
+            <option value="not_verifiable">Not verifiable</option>
+            <option value="bounced">Bounced</option>
+          </select>
+          <button id="refresh">Refresh now</button>
+        </div>
       </div>
 
       <details class="reliability-legend">
@@ -113,6 +130,7 @@
         <tbody id="messageTableBody"></tbody>
       </table>
       <p id="emptyState" class="empty" style="display:none">No tracked messages yet. Send a tracked email from Gmail to see it here.</p>
+      <p id="filteredEmptyState" class="empty">No messages match your search or filter.</p>
       <button id="loadMore" style="display:none">Load more</button>
     </div>
 

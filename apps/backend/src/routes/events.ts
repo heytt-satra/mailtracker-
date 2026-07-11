@@ -91,6 +91,7 @@ eventsRoute.get('/v1/messages/:msgId/events', async (c) => {
     verdict: row.verdict,
     reason: row.reason,
     suppressed: row.verdict === 'machine_suspect' || row.verdict === 'not_verifiable',
+    clickedUrl: row.clicked_url,
   }));
   return c.json({ msgId: message.id, status: message.status, events });
 });

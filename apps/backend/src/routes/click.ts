@@ -50,6 +50,7 @@ clickRoute.get('/l/:token', async (c) => {
         headers: {},
         fetchSequenceMs,
         occurredAt: occurredAt.toISOString(),
+        clickedUrl: link.originalUrl, // ADR-30: which link, not just "a link"
       }).catch(() => null);
       if (!rawEvent) return;
 

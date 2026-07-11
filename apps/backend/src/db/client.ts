@@ -318,6 +318,8 @@ export async function insertRawEvent(
     occurredAt: string;
     /** ADR-19. 'top' for the primary pixel, 'mid'/'bottom' for depth beacons, undefined/null for link_click. */
     beaconPosition?: BeaconPosition | null;
+    /** ADR-30. The real destination URL for a link_click row (not our redirect token) — null/undefined for pixel_fetch. */
+    clickedUrl?: string | null;
   },
 ): Promise<{ id: string; occurredAt: string }> {
   const { data, error } = await db
@@ -333,6 +335,7 @@ export async function insertRawEvent(
       fetch_sequence_ms: params.fetchSequenceMs,
       occurred_at: params.occurredAt,
       beacon_position: params.beaconPosition ?? null,
+      clicked_url: params.clickedUrl ?? null,
     })
     .select('id')
     .single();
@@ -447,12 +450,14 @@ export interface TimelineRow {
   kind: EventKind;
   verdict: Verdict;
   reason: string;
+  /** ADR-30. The real destination URL for a link_click row, null otherwise. */
+  clicked_url: string | null;
 }
 
 export async function getMessageTimeline(db: SupabaseClient, messageId: string): Promise<TimelineRow[]> {
   const { data, error } = await db
     .from('verdicts')
-    .select('verdict, reason, raw_events(occurred_at, kind)')
+    .select('verdict, reason, raw_events(occurred_at, kind, clicked_url)')
     .eq('message_id', messageId)
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -463,6 +468,7 @@ export async function getMessageTimeline(db: SupabaseClient, messageId: string):
       kind: (rawEvent?.kind as EventKind) ?? 'pixel_fetch',
       verdict: row.verdict as Verdict,
       reason: row.reason,
+      clicked_url: rawEvent?.clicked_url ?? null,
     };
   });
 }
