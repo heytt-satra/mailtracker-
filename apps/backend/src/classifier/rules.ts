@@ -1,5 +1,5 @@
 import type { ClassificationInput, ClassificationResult } from '@mailtrack/shared';
-import { isWithinPrefetchWindow } from './timing';
+import { isWithinGmailProxyCachingWindow, isWithinPrefetchWindow } from './timing';
 import { classifyUserAgent } from './useragent';
 import { classifyAsn } from './asn';
 
@@ -86,13 +86,24 @@ export function classifyEvent(input: ClassificationInput): ClassificationResult 
     };
   }
 
-  // Gmail's own image proxy fetching outside the prefetch window, with no
-  // burst pattern and no scanner signal, is the strongest available proxy
-  // for "a human actually rendered this message."
+  // Gmail's own image proxy pre-fetches a new message's images automatically
+  // on delivery, independent of the recipient ever opening it — confirmed
+  // empirically against live data, where every test message showed 2-4
+  // GoogleImageProxy fetches landing 10-135s after send regardless of any
+  // human action. The 45s prefetch-window check above only catches the
+  // literal first fetch, so a second/third automated caching pass sails
+  // right past it. Require it to also clear the wider caching window before
+  // trusting it as a genuine open.
   if (uaClass === 'gmail_proxy') {
+    if (isWithinGmailProxyCachingWindow(event.fetchSequenceMs)) {
+      return {
+        verdict: 'machine_suspect',
+        reason: `Fetched via Gmail image proxy ${Math.round(event.fetchSequenceMs / 1000)}s after send — inside Gmail's own automated image-caching window, not yet distinguishable from a genuine open.`,
+      };
+    }
     return {
       verdict: 'verified_open',
-      reason: 'Fetched via Gmail image proxy outside the prefetch window, consistent with a human viewing the message.',
+      reason: 'Fetched via Gmail image proxy outside both the prefetch window and Gmail\'s own image-caching window, consistent with a human viewing the message.',
     };
   }
 

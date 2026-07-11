@@ -3,7 +3,7 @@ import type { AsnIntel, ClassificationInput, RawFetchEvent } from '@mailtrack/sh
 import { classifyEvent } from '../src/classifier/rules';
 import { nextStatus, verdictToStatus } from '../src/classifier/escalation';
 import { classifyUserAgent } from '../src/classifier/useragent';
-import { isWithinPrefetchWindow } from '../src/classifier/timing';
+import { isWithinGmailProxyCachingWindow, isWithinPrefetchWindow } from '../src/classifier/timing';
 
 function baseEvent(overrides: Partial<RawFetchEvent> = {}): RawFetchEvent {
   return {
@@ -40,6 +40,18 @@ describe('unit: timing filter', () => {
   it('does not flag fetches outside the window', () => {
     expect(isWithinPrefetchWindow(45_001)).toBe(false);
     expect(isWithinPrefetchWindow(3_600_000)).toBe(false);
+  });
+});
+
+describe('unit: Gmail proxy image-caching window', () => {
+  it('flags fetches inside the 5-minute window, including the 10-135s range seen in real production data', () => {
+    expect(isWithinGmailProxyCachingWindow(18_068)).toBe(true);
+    expect(isWithinGmailProxyCachingWindow(135_362)).toBe(true);
+    expect(isWithinGmailProxyCachingWindow(300_000)).toBe(true);
+  });
+  it('does not flag fetches outside the window', () => {
+    expect(isWithinGmailProxyCachingWindow(300_001)).toBe(false);
+    expect(isWithinGmailProxyCachingWindow(2 * 60 * 60 * 1000)).toBe(false);
   });
 });
 
@@ -196,6 +208,35 @@ describe('regression: permanent fixtures (PLAN.md section 15)', () => {
     );
     expect(laterSuspect.verdict).toBe('machine_suspect');
     expect(nextStatus('opened', laterSuspect.verdict)).toBe('opened');
+  });
+
+  it("7. a second GoogleImageProxy fetch inside Gmail's own automated image-caching window never escalates to opened, even though it's outside the 45s prefetch window", () => {
+    // Empirically confirmed against live production data (2026-07-11):
+    // Gmail's own image proxy pre-fetches a new message's images 10-135s
+    // after delivery on every single message, regardless of whether the
+    // recipient ever opened it — this is what caused "opened / likely read"
+    // to appear before the user had touched the email at all. The 45s
+    // prefetch-window check alone can't catch this since it only gates the
+    // literal FIRST fetch; this is the second/third automated pass.
+    const cachingBurstFetch = classifyEvent(
+      baseInput({
+        event: baseEvent({ fetchSequenceMs: 88_000 }), // real observed value: 88s
+        isFirstFetch: false,
+      }),
+    );
+    expect(cachingBurstFetch.verdict).not.toBe('verified_open');
+    expect(nextStatus('delivered', cachingBurstFetch.verdict)).not.toBe('opened');
+
+    // But a GoogleImageProxy fetch that clears BOTH windows still verifies —
+    // this must keep working, or every real open would silently stop counting.
+    const genuineOpen = classifyEvent(
+      baseInput({
+        event: baseEvent({ fetchSequenceMs: 6 * 60 * 1000 }), // 6 minutes, past both windows
+        isFirstFetch: false,
+      }),
+    );
+    expect(genuineOpen.verdict).toBe('verified_open');
+    expect(nextStatus('delivered', genuineOpen.verdict)).toBe('opened');
   });
 });
 
