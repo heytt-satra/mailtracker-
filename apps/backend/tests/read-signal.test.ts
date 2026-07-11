@@ -13,13 +13,25 @@ describe('computeReadSignal', () => {
     expect(result.readEvidence).toMatch(/automated activity/i);
   });
 
-  it('a single verified open is glanced, with no duration claimed', () => {
+  it('a SINGLE verified open is already likely_read, with no duration claimed (ADR-29)', () => {
+    // A verified_open only exists after passing the classifier's full
+    // human-vs-machine check (timing window, UA, ASN, burst) — it is never a
+    // raw notification-preview fetch, so one is already real signal.
     const result = computeReadSignal([{ verdict: 'verified_open', createdAt: '2026-01-01T00:00:00.000Z' }]);
-    expect(result.readConfidence).toBe('glanced');
+    expect(result.readConfidence).toBe('likely_read');
     expect(result.minEngagedSeconds).toBeNull();
+    expect(result.readEvidence).toMatch(/consistent with a human reading/i);
   });
 
-  it('two verified opens -> likely_read (ADR-28: tier is driven by verified-open count)', () => {
+  it('a single verified open mixed with machine-only noise still resolves to likely_read', () => {
+    const result = computeReadSignal([
+      { verdict: 'machine_suspect', createdAt: '2026-01-01T00:00:00.000Z' },
+      { verdict: 'verified_open', createdAt: '2026-01-01T00:00:05.000Z' },
+    ]);
+    expect(result.readConfidence).toBe('likely_read');
+  });
+
+  it('two verified opens -> likely_read, still (ADR-28/29: tier is driven by verified-open count)', () => {
     const result = computeReadSignal([
       { verdict: 'verified_open', createdAt: '2026-01-01T00:00:00.000Z' },
       { verdict: 'verified_open', createdAt: '2026-01-02T00:00:00.000Z' },
@@ -39,7 +51,7 @@ describe('computeReadSignal', () => {
       { verdict: 'verified_open', createdAt: '2026-01-01T00:01:00.000Z' },
     ]);
     expect(result.readConfidence).toBe('likely_read');
-    expect(result.readEvidence).toMatch(/genuinely viewed/i);
+    expect(result.readEvidence).toMatch(/consistent with a human reading/i);
   });
 
   it('opens spread minutes apart -> likely_read, session count surfaced for context (ADR-26/28)', () => {

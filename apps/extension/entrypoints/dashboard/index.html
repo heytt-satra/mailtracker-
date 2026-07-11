@@ -99,9 +99,8 @@
         <summary>What does each confidence level actually mean?</summary>
         <ul>
           <li><strong>Replied</strong> — Definitive. A reply must be written by a human; no sync, proxy, or prefetch can produce one.</li>
-          <li><strong>Read</strong> (open + click) — Very high. Two independent signals, plus a proven minimum time-open.</li>
-          <li><strong>Likely read</strong> — High. Opened across distinct sessions (rapid re-loads collapsed; automated-sync patterns flagged). An open proves it was rendered, not that every word was read.</li>
-          <li><strong>Glanced</strong> — Moderate. Genuinely opened by a human, but a glance and a careful read look identical at the pixel level.</li>
+          <li><strong>Read</strong> (open + click, or a reply) — Very high. Two independent signals, plus a proven minimum time-open.</li>
+          <li><strong>Likely read</strong> — High. At least one verified open — meaning it passed every automated-fetch check (timing window, proxy/browser signature, ASN, burst pattern) and was rendered by a real client. Not proof every word was read, but a genuine human-triggered render, not a notification preview.</li>
           <li><strong>Not verifiable</strong> — Honest abstention. Apple Mail Privacy Protection, a scanner, or a prefetch was detected — we decline to claim a read rather than guess.</li>
         </ul>
         <p class="muted">Classifier accuracy against our labeled test scenarios is measured, not asserted — see the project's ACCURACY.md. Real-world field accuracy across live email clients is a separate, in-progress measurement.</p>

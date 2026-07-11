@@ -124,9 +124,8 @@ export function formatReport(report: HarnessReport, generatedAtIso: string): str
   lines.push('|---|---|---|');
   lines.push('| Replied | **Definitive** | A reply must be authored by a human; no sync/proxy/prefetch can produce one (ADR-21). |');
   lines.push('| Clicked | **Very high** | A link navigation, with known link-scanners filtered out. Residual risk: an unlisted corporate scanner. |');
-  lines.push('| Read (open+click) | **Very high** | Two independent signals, plus a proven minimum engaged-time bracket (ADR-18). |');
-  lines.push('| Likely read (multi-session) | **High** | Distinct viewing sessions, sync-pattern-filtered (ADR-22) — but an open proves render, not that every word was read. |');
-  lines.push('| Glanced (single session) | **Moderate** | Genuinely rendered by a human, but a glance and a careful read look identical at the pixel level. |');
+  lines.push('| Read (open+click, or reply) | **Very high** | Two independent signals, plus a proven minimum engaged-time bracket (ADR-18). |');
+  lines.push('| Likely read | **High** | At least one verified open — already passed the timing/UA/ASN/burst checks that filter out prefetches and scanners (ADR-29). A genuine human-triggered render, not proof every word was read. |');
   lines.push('| Not verifiable | **N/A (honest abstention)** | Apple MPP / scanner / prefetch detected — we decline to claim a read rather than guess. |');
   lines.push('');
   return lines.join('\n');

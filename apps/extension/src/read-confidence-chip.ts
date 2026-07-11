@@ -18,6 +18,9 @@ export function describeReadConfidence(confidence: ReadConfidence | null): ReadC
     case 'likely_read':
       return { label: 'Likely read', color: '#1a73e8' };
     case 'glanced':
+      // ADR-29: no longer produced by computeReadSignal (a single verified
+      // open is now 'likely_read' — see read-signal.ts). Kept in the type
+      // and this switch for exhaustiveness/forward-compat, not currently reachable.
       return { label: 'Glanced', color: '#9aa0a6' };
     case 'not_verifiable':
       return { label: 'Not verifiable', color: '#9aa0a6' };

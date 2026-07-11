@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
-import type { MessageListResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
+import type { EventsPollResponse, MessageListResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
 import { deleteMessage, getMessageById, getMessageTimeline, getSupabase, getVerdictStatsForMessages, listMessagesForUser } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
+import { buildPollUpdates } from '../poll-updates';
 
 export const eventsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -11,6 +12,14 @@ export const eventsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 // route with auth.
 eventsRoute.use('/v1/messages', apiKeyAuth);
 eventsRoute.use('/v1/messages/*', apiKeyAuth);
+// ADR-30: /v1/events/poll lives outside the /v1/messages prefix and was
+// never covered by either line above — meaning apiKeyAuth never ran on it,
+// c.get('userId') was always undefined, and the query below has been
+// failing with "invalid input syntax for type uuid: undefined" since this
+// endpoint was first built (ADR-7). This is the actual root cause of
+// notifications never working; found by tailing live Worker logs against a
+// real deployed request rather than guessing further.
+eventsRoute.use('/v1/events/poll', apiKeyAuth);
 
 // Dashboard message list (M5). Paginated newest-first; `?offset=N` continues
 // from a prior `nextOffset`.
@@ -124,16 +133,35 @@ eventsRoute.get('/v1/events/poll', async (c) => {
   }
 
   const db = getSupabase(c.env);
-  const { data, error } = await db
-    .from('messages')
-    .select('id, status, status_updated_at')
-    .eq('user_id', c.get('userId'))
-    .gt('status_updated_at', sinceDate.toISOString())
-    .in('status', ['opened', 'clicked']);
-  if (error) return c.json({ error: 'Query failed' }, 500);
+  const userId = c.get('userId');
 
-  return c.json({
+  // ADR-30: two independent queries, merged by the pure buildPollUpdates().
+  // Bounces live in bounce_detected_at, a separate column (ADR-20 — bounce
+  // is orthogonal to the status ladder, never a MessageStatus value), so a
+  // single `status IN (...)` query can never catch them — that gap, plus
+  // 'replied' being missing from the IN list, meant neither ever produced a
+  // notification before this fix.
+  const [statusResult, bounceResult] = await Promise.all([
+    db
+      .from('messages')
+      .select('id, status, status_updated_at')
+      .eq('user_id', userId)
+      .gt('status_updated_at', sinceDate.toISOString())
+      .in('status', ['opened', 'clicked', 'replied']),
+    db.from('messages').select('id, bounce_detected_at').eq('user_id', userId).gt('bounce_detected_at', sinceDate.toISOString()),
+  ]);
+  if (statusResult.error) {
+    console.error('[events/poll] statusResult query failed:', statusResult.error);
+    return c.json({ error: 'Query failed' }, 500);
+  }
+  if (bounceResult.error) {
+    console.error('[events/poll] bounceResult query failed:', bounceResult.error);
+    return c.json({ error: 'Query failed' }, 500);
+  }
+
+  const response: EventsPollResponse = {
     polledAt: new Date().toISOString(),
-    updates: (data ?? []).map((m) => ({ msgId: m.id, status: m.status, statusUpdatedAt: m.status_updated_at })),
-  });
+    updates: buildPollUpdates(statusResult.data ?? [], bounceResult.data ?? []),
+  };
+  return c.json(response);
 });

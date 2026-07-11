@@ -1,6 +1,7 @@
 import type {
   CreateMessageRequest,
   CreateMessageResponse,
+  EventsPollResponse,
   MessageListResponse,
   MessageStatusResponse,
   ReportBounceRequest,
@@ -59,13 +60,7 @@ export function getMessageTimeline(apiKey: string, msgId: string): Promise<{ msg
   return request(`/v1/messages/${msgId}/events`, apiKey);
 }
 
-export interface PollUpdate {
-  msgId: string;
-  status: 'opened' | 'clicked';
-  statusUpdatedAt: string;
-}
-
-export function pollEvents(apiKey: string, sinceIso: string): Promise<{ polledAt: string; updates: PollUpdate[] }> {
+export function pollEvents(apiKey: string, sinceIso: string): Promise<EventsPollResponse> {
   return request(`/v1/events/poll?since=${encodeURIComponent(sinceIso)}`, apiKey);
 }
 

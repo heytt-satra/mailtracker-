@@ -82,30 +82,25 @@ export function computeReadSignal(events: VerdictEvent[]): ReadSignal {
     };
   }
 
-  // ADR-28 (reverts ADR-22's session-based tiering): the confidence tier is
-  // driven by the count of VERIFIED opens, not clustered sessions. Gmail's
-  // image proxy fires several fetches for a single genuine open, so 2+
-  // verified opens means the message was actually rendered and viewed —
-  // "likely read". A lone verified fetch is a glance. Session count is still
-  // computed and surfaced for context (and syncSuspect as a caveat), but it
-  // no longer downgrades the verdict — which had made a real, actively-read
-  // open show as "glanced", the exact regression the user reported.
-  if (opens.length >= 2) {
-    const sessionNote = sessionCount && sessionCount >= 2 ? ` across ${sessionCount} separate sessions` : '';
+  // ADR-29: a single verified_open already means the classifier confirmed a
+  // genuine human render — it only reaches this branch AFTER passing the
+  // prefetch-timing window, the Gmail-proxy/browser UA check, the ASN check,
+  // and the burst-fetch check (classifier/rules.ts). It is NOT a raw
+  // notification-preview fetch — those are correctly caught upstream and
+  // classified machine_suspect, never verified_open, so they never reach
+  // here at all. Given that, requiring a SECOND open before counting it as
+  // real engagement was overly conservative and produced a confusing UX
+  // (open it once, get "Glanced"; a notification-preview fetch — which
+  // isn't even a verified_open — produces no badge at all). So: any
+  // verified open, on its own, is "likely_read". Session count and
+  // syncSuspect are still computed and surfaced for context ("opened N
+  // times across M sessions"), they just no longer gate the tier.
+  if (opens.length >= 1) {
+    const timesNote = opens.length > 1 ? ` (opened ${opens.length} times${sessionCount && sessionCount >= 2 ? ` across ${sessionCount} sessions` : ''})` : '';
     return {
       readConfidence: 'likely_read',
       minEngagedSeconds: null,
-      readEvidence: `Opened and rendered ${opens.length} times${sessionNote} — genuinely viewed by a human, consistent with reading${syncCaveat}`,
-      sessionCount,
-      syncSuspect: sync.suspect,
-    };
-  }
-
-  if (opens.length === 1) {
-    return {
-      readConfidence: 'glanced',
-      minEngagedSeconds: null,
-      readEvidence: `Opened once — a brief view; not enough repeat rendering to confirm sustained reading`,
+      readEvidence: `Opened and rendered by a real client, outside the automated-prefetch window — consistent with a human reading it${timesNote}${syncCaveat}`,
       sessionCount,
       syncSuspect: sync.suspect,
     };

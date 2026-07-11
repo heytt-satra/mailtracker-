@@ -211,3 +211,23 @@ export interface MessageListResponse {
   messages: MessageSummary[];
   nextOffset: number | null;
 }
+
+/**
+ * ADR-30. What the background poller notifies on. Previously hardcoded to
+ * only 'opened'/'clicked' in both the backend query and the extension's
+ * local type — 'replied' (ADR-21) and bounces (ADR-20, a separate column,
+ * not a MessageStatus value) were silently never included, so neither ever
+ * produced a desktop notification.
+ */
+export type PollEventKind = 'opened' | 'clicked' | 'replied' | 'bounced';
+
+export interface PollUpdate {
+  msgId: string;
+  event: PollEventKind;
+  occurredAt: string;
+}
+
+export interface EventsPollResponse {
+  polledAt: string;
+  updates: PollUpdate[];
+}
