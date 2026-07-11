@@ -82,27 +82,30 @@ export function computeReadSignal(events: VerdictEvent[]): ReadSignal {
     };
   }
 
-  // ADR-22: the branch is driven by SESSION count, not raw open count — five
-  // fetches in one sitting is one viewing occasion (glanced), not repeat
-  // engagement. This is the direct fix for "opened 5 times?" overstating things.
-  if (sessionCount !== null && sessionCount >= 2) {
+  // ADR-28 (reverts ADR-22's session-based tiering): the confidence tier is
+  // driven by the count of VERIFIED opens, not clustered sessions. Gmail's
+  // image proxy fires several fetches for a single genuine open, so 2+
+  // verified opens means the message was actually rendered and viewed —
+  // "likely read". A lone verified fetch is a glance. Session count is still
+  // computed and surfaced for context (and syncSuspect as a caveat), but it
+  // no longer downgrades the verdict — which had made a real, actively-read
+  // open show as "glanced", the exact regression the user reported.
+  if (opens.length >= 2) {
+    const sessionNote = sessionCount && sessionCount >= 2 ? ` across ${sessionCount} separate sessions` : '';
     return {
       readConfidence: 'likely_read',
       minEngagedSeconds: null,
-      readEvidence: `Opened across ${sessionCount} distinct sessions (${opens.length} total fetches, first ${opens[0]}, last ${opens[opens.length - 1]}) — repeat engagement, though no single continuous duration is measurable${syncCaveat}`,
+      readEvidence: `Opened and rendered ${opens.length} times${sessionNote} — genuinely viewed by a human, consistent with reading${syncCaveat}`,
       sessionCount,
       syncSuspect: sync.suspect,
     };
   }
 
-  if (sessionCount === 1) {
+  if (opens.length === 1) {
     return {
       readConfidence: 'glanced',
       minEngagedSeconds: null,
-      readEvidence:
-        opens.length > 1
-          ? `Opened in a single session (${opens.length} fetches close together) — one viewing occasion, no evidence of returning`
-          : `Opened once — no further signal to confirm sustained reading`,
+      readEvidence: `Opened once — a brief view; not enough repeat rendering to confirm sustained reading`,
       sessionCount,
       syncSuspect: sync.suspect,
     };

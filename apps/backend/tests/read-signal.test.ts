@@ -19,7 +19,7 @@ describe('computeReadSignal', () => {
     expect(result.minEngagedSeconds).toBeNull();
   });
 
-  it('opens on two separate days are two sessions -> likely_read (ADR-22 session clustering)', () => {
+  it('two verified opens -> likely_read (ADR-28: tier is driven by verified-open count)', () => {
     const result = computeReadSignal([
       { verdict: 'verified_open', createdAt: '2026-01-01T00:00:00.000Z' },
       { verdict: 'verified_open', createdAt: '2026-01-02T00:00:00.000Z' },
@@ -27,21 +27,22 @@ describe('computeReadSignal', () => {
     expect(result.readConfidence).toBe('likely_read');
     expect(result.minEngagedSeconds).toBeNull();
     expect(result.sessionCount).toBe(2);
-    expect(result.readEvidence).toContain('2 distinct sessions');
   });
 
-  it('several rapid re-fetches in one sitting are ONE session -> glanced, not repeat engagement (the "opened 5 times?" fix)', () => {
+  it('several verified render-fetches from one real open -> likely_read (the reported regression fix)', () => {
+    // Gmail fires multiple proxy fetches for a single genuine open. These must
+    // read as "likely_read" (the message was actively rendered/viewed), NOT
+    // "glanced" — which is exactly what ADR-22 wrongly did by collapsing them.
     const result = computeReadSignal([
       { verdict: 'verified_open', createdAt: '2026-01-01T00:00:00.000Z' },
       { verdict: 'verified_open', createdAt: '2026-01-01T00:00:10.000Z' },
       { verdict: 'verified_open', createdAt: '2026-01-01T00:01:00.000Z' },
     ]);
-    expect(result.readConfidence).toBe('glanced');
-    expect(result.sessionCount).toBe(1);
-    expect(result.readEvidence).toMatch(/single session/i);
+    expect(result.readConfidence).toBe('likely_read');
+    expect(result.readEvidence).toMatch(/genuinely viewed/i);
   });
 
-  it('opens spread minutes apart are separate sessions with a 5-min gap (ADR-26) -> likely_read', () => {
+  it('opens spread minutes apart -> likely_read, session count surfaced for context (ADR-26/28)', () => {
     const base = new Date('2026-01-01T00:00:00.000Z').getTime();
     const at = (min: number) => new Date(base + min * 60000).toISOString();
     // 0, 15, 27, 89, 516 min -> every gap > 5 min -> five distinct sessions
