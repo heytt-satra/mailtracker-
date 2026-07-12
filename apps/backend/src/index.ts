@@ -9,6 +9,7 @@ import { eventsRoute } from './routes/events';
 import { authRoute } from './routes/auth';
 import { bouncesRoute } from './routes/bounces';
 import { repliesRoute } from './routes/replies';
+import { billingRoute } from './routes/billing';
 import { getSupabase } from './db/client';
 import { runClassifierSweep } from './classifier/sweep';
 import { refreshAppleRelayRanges } from './classifier/intel-refresh';
@@ -33,6 +34,7 @@ app.route('/', clickRoute);
 app.route('/', eventsRoute);
 app.route('/', bouncesRoute);
 app.route('/', repliesRoute);
+app.route('/', billingRoute);
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

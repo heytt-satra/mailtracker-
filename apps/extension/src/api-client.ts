@@ -1,4 +1,7 @@
 import type {
+  BillingStatusResponse,
+  CreateCheckoutRequest,
+  CreateCheckoutResponse,
   CreateMessageRequest,
   CreateMessageResponse,
   EventsPollResponse,
@@ -12,7 +15,15 @@ import type {
 } from '@mailtrack/shared';
 import { MAILTRACK_API_BASE_URL } from './config';
 
-export class MailTrackApiError extends Error {}
+export class MailTrackApiError extends Error {
+  /** ADR-36. Lets callers distinguish e.g. 402 (subscription required) from a generic failure without parsing the message string. */
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
 async function request<T>(path: string, apiKey: string, init: RequestInit = {}, timeoutMs?: number): Promise<T> {
   const controller = new AbortController();
@@ -28,7 +39,7 @@ async function request<T>(path: string, apiKey: string, init: RequestInit = {}, 
       },
     });
     if (!response.ok) {
-      throw new MailTrackApiError(`MailTrack API ${path} returned ${response.status}`);
+      throw new MailTrackApiError(`MailTrack API ${path} returned ${response.status}`, response.status);
     }
     return (await response.json()) as T;
   } finally {
@@ -64,11 +75,20 @@ export function pollEvents(apiKey: string, sinceIso: string): Promise<EventsPoll
   return request(`/v1/events/poll?since=${encodeURIComponent(sinceIso)}`, apiKey);
 }
 
+/** ADR-36. Creates a Dodo checkout session for the given plan; the caller opens the returned URL. */
+export function createCheckout(apiKey: string, body: CreateCheckoutRequest): Promise<CreateCheckoutResponse> {
+  return request<CreateCheckoutResponse>('/v1/billing/checkout', apiKey, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function getBillingStatus(apiKey: string): Promise<BillingStatusResponse> {
+  return request<BillingStatusResponse>('/v1/billing/status', apiKey);
+}
+
 export async function exportMessageCsv(apiKey: string, msgId: string): Promise<string> {
   const response = await fetch(`${MAILTRACK_API_BASE_URL}/v1/messages/${msgId}/export`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-  if (!response.ok) throw new MailTrackApiError(`Export failed with ${response.status}`);
+  if (!response.ok) throw new MailTrackApiError(`Export failed with ${response.status}`, response.status);
   return response.text();
 }
 
@@ -98,6 +118,6 @@ export async function provisionApiKey(supabaseAccessToken: string): Promise<{ ap
     method: 'POST',
     headers: { Authorization: `Bearer ${supabaseAccessToken}` },
   });
-  if (!response.ok) throw new MailTrackApiError(`Provisioning failed with ${response.status}`);
+  if (!response.ok) throw new MailTrackApiError(`Provisioning failed with ${response.status}`, response.status);
   return response.json();
 }

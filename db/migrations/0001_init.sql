@@ -117,6 +117,20 @@ create table verdicts (
 );
 create index idx_verdicts_message_id on verdicts(message_id);
 
+-- ADR-36: subscription gating, see db/migrations/0007_add_subscriptions.sql.
+-- Dodo Payments webhooks are the only writer — never trust client-side
+-- checkout events alone for payment confirmation.
+create table subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  dodo_subscription_id text not null unique,
+  status text not null check (status in ('active', 'past_due', 'cancelled', 'expired')),
+  current_period_end timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index idx_subscriptions_user_id on subscriptions(user_id);
+
 create table asn_intel (
   asn integer primary key,
   org_name text,
@@ -162,3 +176,4 @@ alter table raw_events enable row level security;
 alter table verdicts enable row level security;
 alter table asn_intel enable row level security;
 alter table ip_ranges enable row level security;
+alter table subscriptions enable row level security;

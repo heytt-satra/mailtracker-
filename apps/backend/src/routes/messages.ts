@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { CreateMessageRequest, CreateMessageResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
-import { getSupabase, insertBeaconTokens, insertLinkTokens, insertMessage } from '../db/client';
+import { getSupabase, hasActiveSubscription, insertBeaconTokens, insertLinkTokens, insertMessage } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { randomToken } from '../lib/crypto';
 
@@ -34,11 +34,21 @@ const MAX_SUBJECT_LENGTH = 500;
 const MAX_RECIPIENT_LENGTH = 500;
 
 messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
+  const userId = c.get('userId');
+
   // Bounds the blast radius of a leaked/compromised API key — 30 tracked
   // sends/minute is generous for a human composing email, well below what a
   // spam/abuse script would want to do with a stolen key.
-  const { success } = await c.env.MESSAGES_RATE_LIMITER.limit({ key: c.get('userId') });
+  const { success } = await c.env.MESSAGES_RATE_LIMITER.limit({ key: userId });
   if (!success) return c.json({ error: 'Rate limit exceeded' }, 429);
+
+  // ADR-36: subscription gate. Only NEW tracking is blocked — a lapsed
+  // subscription never touches already-tracked messages or dashboard
+  // history, both of which read straight through this route.
+  const db = getSupabase(c.env);
+  if (!(await hasActiveSubscription(db, userId))) {
+    return c.json({ error: 'An active MailTrack subscription is required to track new emails.' }, 402);
+  }
 
   const body = await c.req.json<CreateMessageRequest>().catch(() => null);
   if (!body || !Array.isArray(body.linkUrls)) {
@@ -51,8 +61,6 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
   const subject = typeof body.subject === 'string' ? body.subject.trim().slice(0, MAX_SUBJECT_LENGTH) || undefined : undefined;
   const recipient = typeof body.recipient === 'string' ? body.recipient.trim().slice(0, MAX_RECIPIENT_LENGTH) || undefined : undefined;
 
-  const db = getSupabase(c.env);
-  const userId = c.get('userId');
   const pixelToken = randomToken();
 
   const message = await insertMessage(db, { userId, gmailMessageId: body.gmailMessageId, subject, recipient, pixelToken });

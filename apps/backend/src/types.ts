@@ -18,6 +18,15 @@ export interface Env {
   MESSAGES_RATE_LIMITER: RateLimit;
   /** Keyed by IP — bounds signup/key-rotation abuse independent of any account. */
   AUTH_RATE_LIMITER: RateLimit;
+  /** ADR-36. 'test' | 'live' — selects test.dodopayments.com vs live.dodopayments.com. Defaults to 'test' (see routes/billing.ts) so a missing/unset var fails toward the sandbox, never accidentally live. */
+  DODO_MODE?: string;
+  /** Secret API key from the Dodo dashboard — set via `wrangler secret put DODO_API_KEY`, never committed. */
+  DODO_API_KEY: string;
+  /** Webhook signing secret from the Dodo dashboard's webhook registration — set via `wrangler secret put DODO_WEBHOOK_SECRET`. */
+  DODO_WEBHOOK_SECRET: string;
+  /** Product IDs, not secret — safe as plain wrangler.toml vars. */
+  DODO_PRODUCT_ID_MONTHLY: string;
+  DODO_PRODUCT_ID_YEARLY: string;
 }
 
 export interface Variables {

@@ -236,3 +236,24 @@ export interface EventsPollResponse {
   polledAt: string;
   updates: PollUpdate[];
 }
+
+/**
+ * ADR-36. Subscription is the only paid tier — a monthly or annual Dodo
+ * Payments plan, checked server-side before a new message can be tracked
+ * (POST /v1/messages). Historical data and already-tracked messages remain
+ * visible/functional regardless of subscription status; only NEW tracking
+ * is gated.
+ */
+export type BillingPlan = 'monthly' | 'yearly';
+
+export interface CreateCheckoutRequest {
+  plan: BillingPlan;
+}
+
+export interface CreateCheckoutResponse {
+  checkoutUrl: string;
+}
+
+export interface BillingStatusResponse {
+  active: boolean;
+}

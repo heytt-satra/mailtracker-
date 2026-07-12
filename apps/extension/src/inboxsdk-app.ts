@@ -1,6 +1,6 @@
 import * as InboxSDKLoader from '@inboxsdk/core';
 import { COMPOSE_INJECTION_TIMEOUT_MS, INBOXSDK_APP_ID } from './config';
-import { createMessage, getMessageStatus, reportBounce, reportReply } from './api-client';
+import { createMessage, getMessageStatus, MailTrackApiError, reportBounce, reportReply } from './api-client';
 import {
   getMsgIdForGmailMessage,
   getSettings,
@@ -100,7 +100,13 @@ async function injectTrackingThenSend(composeView: ComposeView): Promise<string 
     // NFR2 fail-open: timeout, network error, or 4xx/5xx all fall through
     // to an untracked send below — the email always sends regardless. But
     // "fail open" only means don't block; it never meant fail silently.
-    console.error('[MailTrack] tracking injection failed, email will send untracked:', err);
+    // ADR-36: a 402 specifically means "no active subscription" — worth its
+    // own message so this doesn't look like a generic/transient failure.
+    if (err instanceof MailTrackApiError && err.status === 402) {
+      console.warn('[MailTrack] tracking skipped: no active subscription. Subscribe from the MailTrack options page to resume tracking. Email will send untracked.');
+    } else {
+      console.error('[MailTrack] tracking injection failed, email will send untracked:', err);
+    }
   } finally {
     try {
       composeView.send();

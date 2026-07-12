@@ -33,6 +33,17 @@ export async function getUserByApiKeyHash(db: SupabaseClient, apiKeyHash: string
   return data;
 }
 
+export interface UserWithEmailRow {
+  id: string;
+  email: string | null;
+}
+
+export async function getUserById(db: SupabaseClient, userId: string): Promise<UserWithEmailRow | null> {
+  const { data, error } = await db.from('users').select('id, email').eq('id', userId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 /**
  * Called by POST /v1/auth/provision. `id` here is the Supabase Auth user's
  * own id (the "profiles" pattern — see db/migrations/0001_init.sql). Each
@@ -438,6 +449,49 @@ export async function getPriorFetchContext(
   const occurredMs = new Date(occurredAt).getTime();
   const burstNeighbors = priorFetches.filter((e) => Math.abs(new Date(e.occurred_at).getTime() - occurredMs) <= 2_000);
   return { isFirstFetch: priorFetches.length === 0, burstFetchCount: burstNeighbors.length + 1 };
+}
+
+export type SubscriptionStatus = 'active' | 'past_due' | 'cancelled' | 'expired';
+
+/**
+ * ADR-36. Upserted only from the Dodo webhook handler, keyed on
+ * dodo_subscription_id (not user_id) so a user resubscribing after
+ * cancellation creates a fresh row rather than colliding with the old one.
+ */
+export async function upsertSubscription(
+  db: SupabaseClient,
+  params: { userId: string; dodoSubscriptionId: string; status: SubscriptionStatus; currentPeriodEnd: string | null },
+): Promise<void> {
+  const { error } = await db.from('subscriptions').upsert(
+    {
+      user_id: params.userId,
+      dodo_subscription_id: params.dodoSubscriptionId,
+      status: params.status,
+      current_period_end: params.currentPeriodEnd,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'dodo_subscription_id' },
+  );
+  if (error) throw error;
+}
+
+export async function markSubscriptionStatus(
+  db: SupabaseClient,
+  dodoSubscriptionId: string,
+  status: Exclude<SubscriptionStatus, 'active'>,
+): Promise<void> {
+  const { error } = await db
+    .from('subscriptions')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('dodo_subscription_id', dodoSubscriptionId);
+  if (error) throw error;
+}
+
+/** Gates POST /v1/messages (ADR-36) — historical data and already-tracked messages stay unaffected either way. */
+export async function hasActiveSubscription(db: SupabaseClient, userId: string): Promise<boolean> {
+  const { data, error } = await db.from('subscriptions').select('id').eq('user_id', userId).eq('status', 'active').limit(1).maybeSingle();
+  if (error) throw error;
+  return data !== null;
 }
 
 export async function markRawEventClassified(db: SupabaseClient, eventId: string): Promise<void> {

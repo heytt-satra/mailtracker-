@@ -41,6 +41,14 @@
       #signedInPanel.visible { display: block; }
       #signedOutPanel.hidden { display: none; }
       .signin-note { font-size: 0.83rem; color: var(--ink-soft); background: var(--brand-tint); border-radius: var(--radius-sm); padding: 0.7rem 0.85rem; margin-bottom: 1rem; }
+
+      #billingCard { display: none; }
+      #billingCard.visible { display: block; }
+      .plan-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.7rem; border-radius: 999px; font-size: 0.82rem; font-weight: 600; margin-bottom: 0.85rem; }
+      .plan-badge.active { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
+      .plan-badge.inactive { color: var(--red); background: color-mix(in srgb, var(--red) 15%, transparent); }
+      .plan-options { display: flex; gap: 0.6rem; }
+      .plan-options button { flex: 1; }
     </style>
   </head>
   <body>
@@ -86,6 +94,17 @@
         </div>
         <div id="status" role="status" aria-live="polite"></div>
       </div>
+    </div>
+
+    <div class="card" id="billingCard" aria-labelledby="billing-heading">
+      <h2 id="billing-heading">Subscription</h2>
+      <p class="card-hint">A subscription is required to track new emails. Already-tracked messages and your dashboard history stay available either way.</p>
+      <div id="billingBadge" class="plan-badge inactive">Checking…</div>
+      <div class="plan-options">
+        <button class="mt-btn mt-btn-primary" id="subscribeMonthly">Subscribe — $4.99/mo</button>
+        <button class="mt-btn mt-btn-ghost" id="subscribeYearly">Subscribe — $49/yr</button>
+      </div>
+      <div id="billingStatus" role="status" aria-live="polite" class="hint"></div>
     </div>
 
     <div class="card" aria-labelledby="export-heading">

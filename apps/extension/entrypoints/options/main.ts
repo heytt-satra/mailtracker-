@@ -1,4 +1,4 @@
-import { deleteMessage, exportMessageCsv, provisionApiKey } from '../../src/api-client';
+import { createCheckout, deleteMessage, exportMessageCsv, getBillingStatus, provisionApiKey } from '../../src/api-client';
 import { logInWithEmail, signUpWithEmail } from '../../src/auth';
 import { getSettings, setSettings } from '../../src/storage';
 
@@ -16,18 +16,55 @@ const notificationsEnabledInput = document.getElementById('notificationsEnabled'
 const bounceDetectionEnabledInput = document.getElementById('bounceDetectionEnabled') as HTMLInputElement;
 const statusEl = document.getElementById('status') as HTMLDivElement;
 
+const billingCard = document.getElementById('billingCard') as HTMLDivElement;
+const billingBadge = document.getElementById('billingBadge') as HTMLDivElement;
+const billingStatusEl = document.getElementById('billingStatus') as HTMLDivElement;
+const subscribeMonthlyBtn = document.getElementById('subscribeMonthly') as HTMLButtonElement;
+const subscribeYearlyBtn = document.getElementById('subscribeYearly') as HTMLButtonElement;
+
 async function refreshView(): Promise<void> {
   const settings = await getSettings();
   const signedIn = !!settings.apiKey;
   signedOutPanel.classList.toggle('hidden', signedIn);
   signedInPanel.classList.toggle('visible', signedIn);
+  billingCard.classList.toggle('visible', signedIn);
   if (signedIn) {
     signedInEmailEl.textContent = settings.accountEmail ? `Signed in as ${settings.accountEmail}` : 'API key active';
     trackingEnabledInput.checked = settings.trackingEnabledByDefault;
     notificationsEnabledInput.checked = settings.notificationsEnabled;
     bounceDetectionEnabledInput.checked = settings.bounceDetectionEnabled;
+    await refreshBillingStatus(settings.apiKey!);
   }
 }
+
+async function refreshBillingStatus(apiKey: string): Promise<void> {
+  billingBadge.textContent = 'Checking…';
+  billingBadge.className = 'plan-badge inactive';
+  try {
+    const { active } = await getBillingStatus(apiKey);
+    billingBadge.textContent = active ? 'Subscription active' : 'No active subscription';
+    billingBadge.className = active ? 'plan-badge active' : 'plan-badge inactive';
+  } catch {
+    billingBadge.textContent = 'Could not check subscription status';
+    billingBadge.className = 'plan-badge inactive';
+  }
+}
+
+async function startCheckout(plan: 'monthly' | 'yearly'): Promise<void> {
+  const settings = await getSettings();
+  if (!settings.apiKey) return;
+  billingStatusEl.textContent = 'Opening checkout…';
+  try {
+    const { checkoutUrl } = await createCheckout(settings.apiKey, { plan });
+    chrome.tabs.create({ url: checkoutUrl });
+    billingStatusEl.textContent = 'Complete your payment in the new tab, then come back and refresh this page.';
+  } catch {
+    billingStatusEl.textContent = 'Could not start checkout. Try again in a moment.';
+  }
+}
+
+subscribeMonthlyBtn.addEventListener('click', () => startCheckout('monthly'));
+subscribeYearlyBtn.addEventListener('click', () => startCheckout('yearly'));
 
 function showAuthMessage(message: string, isError: boolean): void {
   authStatusEl.textContent = message;
