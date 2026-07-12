@@ -10,6 +10,7 @@ import { authRoute } from './routes/auth';
 import { bouncesRoute } from './routes/bounces';
 import { repliesRoute } from './routes/replies';
 import { billingRoute } from './routes/billing';
+import { LANDING_PAGE_HTML } from './pages/landing';
 import { getSupabase } from './db/client';
 import { runClassifierSweep } from './classifier/sweep';
 import { refreshAppleRelayRanges } from './classifier/intel-refresh';
@@ -17,6 +18,9 @@ import { refreshAppleRelayRanges } from './classifier/intel-refresh';
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT }));
+
+// Public marketing page — no auth, no CORS concerns (plain browser navigation).
+app.get('/', (c) => c.html(LANDING_PAGE_HTML));
 
 // Only the authenticated /v1/* API needs CORS at all — /p/*, /b/*, and /l/*
 // are fetched as an <img> src / top-level navigation, neither of which is
