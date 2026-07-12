@@ -27,11 +27,17 @@ export async function startMailTrack(): Promise<void> {
 
 function registerComposeTracking(sdk: InboxSDKInstance): void {
   sdk.Compose.registerComposeViewHandler((composeView) => {
+    // Shared across BOTH the normal-send and schedule-send paths below —
+    // exactly one of the two fires the real injection per compose session
+    // (a user either clicks Send or opens the schedule menu, never both),
+    // and this guard makes whichever fires SECOND (our own resumed
+    // send()/openScheduleSendMenu() call re-firing the same event) a
+    // pass-through instead of re-injecting or canceling again.
     let injectionAttempted = false;
     let trackedMsgId: string | null = null;
-    // Captured at presending (recipients are final once the user hits send)
-    // so the 'sent' handler can record the thread map for reply detection —
-    // the compose view is gone by then, so getToRecipients() can't be called there.
+    // Captured at presending/scheduleSendMenuOpening (recipients are final
+    // by then) so the 'sent' handler can record the thread map for reply
+    // detection — the compose view is gone by the time 'sent' fires.
     let trackedRecipientEmails: string[] = [];
 
     composeView.on('presending', (event) => {
@@ -46,7 +52,26 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
       trackedRecipientEmails = composeView.getToRecipients().map((r) => r.emailAddress);
       event.cancel();
 
-      injectTrackingThenSend(composeView).then((msgId) => {
+      injectTrackingThenResume(composeView, () => composeView.send()).then((msgId) => {
+        trackedMsgId = msgId;
+      });
+    });
+
+    // ADR-38: `presending` never fires for Gmail's native "Schedule send" —
+    // a known InboxSDK gap (github.com/InboxSDK/InboxSDK/issues/1243),
+    // confirmed rather than assumed. Without this, a scheduled send skips
+    // injection entirely and goes out completely untracked, silently.
+    // `scheduleSendMenuOpening` is the real event InboxSDK fires when the
+    // user opens the schedule date/time menu — same cancel-then-resume
+    // shape as presending, resumed via openScheduleSendMenu() instead of
+    // send() so the user still picks their own time normally afterward.
+    composeView.on('scheduleSendMenuOpening', (event) => {
+      if (injectionAttempted) return;
+      injectionAttempted = true;
+      trackedRecipientEmails = composeView.getToRecipients().map((r) => r.emailAddress);
+      event.cancel();
+
+      injectTrackingThenResume(composeView, () => composeView.openScheduleSendMenu()).then((msgId) => {
         trackedMsgId = msgId;
       });
     });
@@ -56,6 +81,14 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
       // recordSentMessage awaits them. Doing it synchronously (the original
       // bug) stored a Promise as the map key and silently broke the status
       // chip and reply-thread correlation.
+      //
+      // ADR-38: for a scheduled send, this compose view is long gone by the
+      // time Gmail actually dispatches the message (hours/days later), so
+      // 'sent' never fires for it — meaning the Gmail status chip and
+      // reply-thread mapping don't work for scheduled sends, even though
+      // opens/clicks/bounce detection do (those only need the pixel/link
+      // tokens already baked into the body, not this event). A real,
+      // smaller residual gap, not silently pretended away.
       console.info('[MailTrack] compose "sent" event fired; trackedMsgId =', trackedMsgId);
       if (!trackedMsgId) return; // tracking wasn't enabled or failed open untracked — nothing to record
       recordSentMessage(event, trackedMsgId, trackedRecipientEmails).catch(() => {});
@@ -65,14 +98,19 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
 
 /**
  * Returns the created msgId on success, or null if tracking was
- * skipped/failed (send still proceeds either way — NFR2). Every skip/fail
- * path logs to console.error: fail-open means never blocking or delaying
- * the send, it does NOT mean failing invisibly. A silent catch here was
- * previously indistinguishable from "nothing went wrong" — found live,
- * when a real user's tracked sends were silently failing with zero
- * diagnostic signal anywhere.
+ * skipped/failed (the resume action always proceeds either way — NFR2).
+ * Every skip/fail path logs to console.error: fail-open means never
+ * blocking or delaying the send, it does NOT mean failing invisibly. A
+ * silent catch here was previously indistinguishable from "nothing went
+ * wrong" — found live, when a real user's tracked sends were silently
+ * failing with zero diagnostic signal anywhere.
+ *
+ * `resume` is `composeView.send()` for a normal send, or
+ * `composeView.openScheduleSendMenu()` for a schedule send (ADR-38) — same
+ * injection logic either way, just a different way of letting Gmail's own
+ * flow continue afterward.
  */
-async function injectTrackingThenSend(composeView: ComposeView): Promise<string | null> {
+async function injectTrackingThenResume(composeView: ComposeView, resume: () => void): Promise<string | null> {
   let msgId: string | null = null;
   try {
     const settings = await getSettings();
@@ -109,7 +147,7 @@ async function injectTrackingThenSend(composeView: ComposeView): Promise<string 
     }
   } finally {
     try {
-      composeView.send();
+      resume();
     } catch {
       // Compose view may have been destroyed (user closed the draft) between
       // cancel() and here; nothing more we can or should do.

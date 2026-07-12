@@ -11,6 +11,19 @@ export interface PresendingEvent {
   cancel: () => void;
 }
 
+/**
+ * ADR-38. `presending` never fires for Gmail's native "Schedule send" —
+ * confirmed via InboxSDK's own community reports, not assumed (a known,
+ * long-standing InboxSDK gap, github.com/InboxSDK/InboxSDK/issues/1243).
+ * `scheduleSendMenuOpening` is the real, officially-typed event that DOES
+ * fire when the user opens the schedule-send date/time menu — confirmed
+ * against the installed package's own compose-view.d.ts. Same
+ * cancel-then-resume shape as `presending`.
+ */
+export interface ScheduleSendMenuOpeningEvent {
+  cancel: () => void;
+}
+
 export interface SentEvent {
   // Both are ASYNC in InboxSDK — confirmed against the installed package's
   // own compose-view.d.ts (`sent(data: { getMessageID(): Promise<string>;
@@ -34,7 +47,10 @@ export interface ComposeView {
   getSubject: () => string;
   getToRecipients: () => Contact[];
   send: (options?: { sendAndArchive?: boolean }) => void;
+  /** ADR-38. Reopens the schedule-send date/time menu — called after injection completes, to resume the flow we cancelled in `scheduleSendMenuOpening`. */
+  openScheduleSendMenu: () => void;
   on(event: 'presending', handler: (event: PresendingEvent) => void): void;
+  on(event: 'scheduleSendMenuOpening', handler: (event: ScheduleSendMenuOpeningEvent) => void): void;
   on(event: 'sent', handler: (event: SentEvent) => void): void;
 }
 
