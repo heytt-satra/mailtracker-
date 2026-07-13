@@ -257,3 +257,40 @@ export interface CreateCheckoutResponse {
 export interface BillingStatusResponse {
   active: boolean;
 }
+
+/**
+ * ADR-39. Weekly/monthly reports — every number here is a real aggregate
+ * over already-tracked data (see apps/backend/src/reports.ts), nothing
+ * estimated. `previous` covers the immediately preceding period of equal
+ * length, for the volume-change comparison.
+ */
+export type ReportPeriod = 'week' | 'month';
+
+export interface ReportTopRecipient {
+  recipient: string;
+  sentCount: number;
+  openedCount: number;
+}
+
+export interface ReportPeriodStats {
+  totalSent: number;
+  verifiedOpenCount: number;
+  clickCount: number;
+  bounceCount: number;
+  notVerifiableCount: number;
+  openRate: number;
+  clickThroughRate: number;
+  avgTimeToOpenMinutes: number | null;
+  sendsByHourUtc: number[];
+  topRecipients: ReportTopRecipient[];
+}
+
+export interface ReportsResponse {
+  period: ReportPeriod;
+  rangeStart: string;
+  rangeEnd: string;
+  current: ReportPeriodStats;
+  previous: ReportPeriodStats;
+  /** Null when the previous period had zero sends — an undefined comparison, not a fabricated 0%/∞. */
+  volumeChangePercent: number | null;
+}
