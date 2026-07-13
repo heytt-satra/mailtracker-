@@ -122,6 +122,34 @@ export async function listMessagesForUser(
   return { rows, nextOffset: rows.length === LIST_PAGE_SIZE ? offset + LIST_PAGE_SIZE : null };
 }
 
+export interface ReportMessageRow {
+  id: string;
+  recipient: string | null;
+  sent_at: string;
+  bounce_detected_at: string | null;
+}
+
+/**
+ * All of a user's messages sent within [startIso, endIso) — feeds the
+ * weekly/monthly reports tab (reports.ts::computeReportStats). Capped at
+ * MAX_REPORT_MESSAGES so a very large send history can't turn a report
+ * request into an unbounded query; a report is a rough trend view, not an
+ * exhaustive export (CSV export already covers the single-message case).
+ */
+const MAX_REPORT_MESSAGES = 2000;
+
+export async function getMessagesForReport(db: SupabaseClient, userId: string, startIso: string, endIso: string): Promise<ReportMessageRow[]> {
+  const { data, error } = await db
+    .from('messages')
+    .select('id, recipient, sent_at, bounce_detected_at')
+    .eq('user_id', userId)
+    .gte('sent_at', startIso)
+    .lt('sent_at', endIso)
+    .limit(MAX_REPORT_MESSAGES);
+  if (error) throw error;
+  return data ?? [];
+}
+
 /**
  * Candidate messages for bounce correlation (ADR-20): every non-bounced
  * message this user sent in the last MAX_BOUNCE_DELAY_MS window (see
