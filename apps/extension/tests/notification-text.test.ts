@@ -47,4 +47,31 @@ describe('buildNotificationText', () => {
     });
     expect(message).toBe('a@b.com replied to your email.');
   });
+
+  it('uses distinct hot-conversation phrasing', () => {
+    const { title, message } = buildNotificationText({
+      msgId: 'm5',
+      event: 'hot_conversation',
+      occurredAt: '2026-01-01T00:00:00.000Z',
+      recipient: 'jane@example.com',
+      subject: 'Q3 proposal',
+    });
+    expect(title).toBe('MailTrack: hot conversation 🔥');
+    expect(message).toMatch(/actively engaging/i);
+    expect(message).toContain('jane@example.com');
+    expect(message).toContain('Q3 proposal');
+  });
+
+  it('uses distinct revival phrasing', () => {
+    const { title, message } = buildNotificationText({
+      msgId: 'm6',
+      event: 'revival',
+      occurredAt: '2026-01-01T00:00:00.000Z',
+      recipient: 'jane@example.com',
+      subject: null,
+    });
+    expect(title).toBe('MailTrack: revived 👋');
+    expect(message).toMatch(/reopened/i);
+    expect(message).toMatch(/gone quiet/i);
+  });
 });

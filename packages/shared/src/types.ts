@@ -221,7 +221,7 @@ export interface MessageListResponse {
  * not a MessageStatus value) were silently never included, so neither ever
  * produced a desktop notification.
  */
-export type PollEventKind = 'opened' | 'clicked' | 'replied' | 'bounced';
+export type PollEventKind = 'opened' | 'clicked' | 'replied' | 'bounced' | 'hot_conversation' | 'revival';
 
 export interface PollUpdate {
   msgId: string;
