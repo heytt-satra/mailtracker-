@@ -11,7 +11,8 @@ import { listMessages, pollEvents } from '../src/api-client';
 import { POLL_INTERVAL_MINUTES } from '../src/config';
 import { getFollowUpSuggestion } from '../src/follow-up';
 import { buildNotificationText } from '../src/notification-text';
-import { getLastFollowUpNotifiedDate, getPollCursor, getSettings, setLastFollowUpNotifiedDate, setPollCursor } from '../src/storage';
+import { getLastFollowUpNotifiedDate, getPollCursor, getSettings, setLastFollowUpNotifiedDate, setPollCursor, type MailTrackSettings } from '../src/storage';
+import type { PollEventKind } from '@mailtrack/shared';
 
 const ALARM_NAME = 'mailtrack-poll';
 const FOLLOW_UP_ALARM_NAME = 'mailtrack-followup-check';
@@ -65,6 +66,16 @@ function ensurePollAlarm(): void {
   chrome.alarms.create(FOLLOW_UP_ALARM_NAME, { periodInMinutes: FOLLOW_UP_CHECK_INTERVAL_MINUTES });
 }
 
+/** Maps each poll event kind to the specific settings toggle that gates it — all still subordinate to the master notificationsEnabled switch. */
+const NOTIFY_TOGGLE_BY_EVENT: Record<PollEventKind, keyof MailTrackSettings> = {
+  opened: 'notifyOnOpen',
+  clicked: 'notifyOnClick',
+  replied: 'notifyOnReply',
+  bounced: 'notifyOnBounce',
+  hot_conversation: 'notifyOnHotConversation',
+  revival: 'notifyOnRevival',
+};
+
 async function pollAndNotify(): Promise<void> {
   const settings = await getSettings();
   if (!settings.apiKey || !settings.notificationsEnabled) return;
@@ -73,6 +84,7 @@ async function pollAndNotify(): Promise<void> {
   const { polledAt, updates } = await pollEvents(settings.apiKey, since);
 
   for (const update of updates) {
+    if (!settings[NOTIFY_TOGGLE_BY_EVENT[update.event]]) continue;
     // Verdicts only escalate (PLAN.md ADR-5) — the backend never sends a
     // downgrade here, so every update in this list is safe to notify on.
     const { title, message } = buildNotificationText(update);
@@ -98,7 +110,7 @@ async function pollAndNotify(): Promise<void> {
  */
 async function checkFollowUpsAndNotify(): Promise<void> {
   const settings = await getSettings();
-  if (!settings.apiKey || !settings.notificationsEnabled) return;
+  if (!settings.apiKey || !settings.notificationsEnabled || !settings.notifyOnFollowUp) return;
 
   const today = new Date().toISOString().slice(0, 10);
   if ((await getLastFollowUpNotifiedDate()) === today) return;
