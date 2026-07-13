@@ -15,6 +15,9 @@ export interface MailTrackSettings {
    * messages whose sender matches mailer-daemon/postmaster are ever read).
    */
   bounceDetectionEnabled: boolean;
+  /** User-configurable follow-up-reminder thresholds (see follow-up.ts) — replaces the previously-hardcoded 3/5-day constants. */
+  followUpNotOpenedDays: number;
+  followUpOpenedNoReplyDays: number;
 }
 
 const DEFAULT_SETTINGS: MailTrackSettings = {
@@ -23,6 +26,8 @@ const DEFAULT_SETTINGS: MailTrackSettings = {
   trackingEnabledByDefault: true,
   notificationsEnabled: true,
   bounceDetectionEnabled: true,
+  followUpNotOpenedDays: 3,
+  followUpOpenedNoReplyDays: 5,
 };
 
 const SETTINGS_KEY = 'mailtrack:settings';

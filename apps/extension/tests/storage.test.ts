@@ -41,6 +41,8 @@ describe('storage', () => {
       trackingEnabledByDefault: true,
       notificationsEnabled: true,
       bounceDetectionEnabled: true,
+      followUpNotOpenedDays: 3,
+      followUpOpenedNoReplyDays: 5,
     });
   });
 

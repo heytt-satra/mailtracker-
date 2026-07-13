@@ -103,12 +103,13 @@ async function checkFollowUpsAndNotify(): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
   if ((await getLastFollowUpNotifiedDate()) === today) return;
 
+  const thresholds = { notOpenedDays: settings.followUpNotOpenedDays, openedNoReplyDays: settings.followUpOpenedNoReplyDays };
   const now = Date.now();
   let needsFollowUpCount = 0;
   let offset: number | null = 0;
   for (let page = 0; page < MAX_FOLLOW_UP_PAGES && offset !== null; page++) {
     const { messages, nextOffset } = await listMessages(settings.apiKey, offset);
-    needsFollowUpCount += messages.filter((m) => getFollowUpSuggestion(m, now) !== null).length;
+    needsFollowUpCount += messages.filter((m) => getFollowUpSuggestion(m, now, thresholds) !== null).length;
     offset = nextOffset;
   }
 

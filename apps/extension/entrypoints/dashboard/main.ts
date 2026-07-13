@@ -1,6 +1,6 @@
 import { getMessageTimeline, listMessages } from '../../src/api-client';
 import { formatSentAt, truncateSubject } from '../../src/dashboard-format';
-import { getFollowUpSuggestion } from '../../src/follow-up';
+import { getFollowUpSuggestion, type FollowUpThresholds } from '../../src/follow-up';
 import { getSettings } from '../../src/storage';
 import { describeStatus } from '../../src/status-chip';
 import { describeReadConfidence } from '../../src/read-confidence-chip';
@@ -27,6 +27,9 @@ const PAGE_SIZE = 50; // must match apps/backend LIST_PAGE_SIZE
 let apiKey: string | null = null;
 let nextOffset: number | null = 0;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+// Read once at init from settings — the dashboard doesn't itself edit these
+// (that's the options page), so a snapshot is enough for the session.
+let followUpThresholds: FollowUpThresholds = { notOpenedDays: 3, openedNoReplyDays: 5 };
 
 // Source of truth for everything currently rendered — polling updates these
 // maps in place rather than tearing down and rebuilding the table, so an
@@ -41,6 +44,7 @@ const expandedRows = new Map<string, HTMLTableRowElement>();
 async function init(): Promise<void> {
   const settings = await getSettings();
   apiKey = settings.apiKey;
+  followUpThresholds = { notOpenedDays: settings.followUpNotOpenedDays, openedNoReplyDays: settings.followUpOpenedNoReplyDays };
   loadingEl.style.display = 'none';
 
   if (!apiKey) {
@@ -101,7 +105,7 @@ function matchesFilter(message: MessageSummary): boolean {
   if (filter === 'read') return message.readConfidence === 'read';
   if (filter === 'likely_read') return message.readConfidence === 'likely_read';
   if (filter === 'not_verifiable') return message.readConfidence === 'not_verifiable';
-  if (filter === 'needs_followup') return getFollowUpSuggestion(message, Date.now()) !== null;
+  if (filter === 'needs_followup') return getFollowUpSuggestion(message, Date.now(), followUpThresholds) !== null;
   return true;
 }
 
@@ -127,7 +131,7 @@ function updateSummary(): void {
   statTotalEl.textContent = String(all.length);
   statOpenedEl.textContent = String(all.filter((m) => m.openCount > 0).length);
   statClickedEl.textContent = String(all.filter((m) => m.clickCount > 0).length);
-  statFollowUpEl.textContent = String(all.filter((m) => getFollowUpSuggestion(m, now) !== null).length);
+  statFollowUpEl.textContent = String(all.filter((m) => getFollowUpSuggestion(m, now, followUpThresholds) !== null).length);
 }
 
 function countCell(count: number): HTMLTableCellElement {
@@ -161,7 +165,7 @@ function paintRow(row: HTMLTableRowElement, message: MessageSummary): void {
   identifierCell.innerHTML = '';
   const primary = document.createElement('div');
   primary.textContent = message.recipient || '(no recipient)';
-  const followUp = getFollowUpSuggestion(message, Date.now());
+  const followUp = getFollowUpSuggestion(message, Date.now(), followUpThresholds);
   if (followUp) {
     const badge = document.createElement('span');
     badge.className = 'follow-up-badge';
@@ -324,7 +328,7 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
   }
 
   let followUpEl: HTMLDivElement | null = null;
-  const followUpSuggestion = getFollowUpSuggestion(message, Date.now());
+  const followUpSuggestion = getFollowUpSuggestion(message, Date.now(), followUpThresholds);
   if (followUpSuggestion) {
     followUpEl = document.createElement('div');
     followUpEl.className = 'read-evidence';
