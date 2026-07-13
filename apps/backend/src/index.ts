@@ -10,6 +10,7 @@ import { authRoute } from './routes/auth';
 import { bouncesRoute } from './routes/bounces';
 import { repliesRoute } from './routes/replies';
 import { billingRoute } from './routes/billing';
+import { reportsRoute } from './routes/reports';
 import { LANDING_PAGE_HTML } from './pages/landing';
 import { getSupabase } from './db/client';
 import { runClassifierSweep } from './classifier/sweep';
@@ -39,6 +40,7 @@ app.route('/', eventsRoute);
 app.route('/', bouncesRoute);
 app.route('/', repliesRoute);
 app.route('/', billingRoute);
+app.route('/', reportsRoute);
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

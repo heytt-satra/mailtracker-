@@ -1,0 +1,61 @@
+import { Hono } from 'hono';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { ReportPeriod, ReportPeriodStats, ReportsResponse } from '@mailtrack/shared';
+import type { Env, Variables } from '../types';
+import { getMessagesForReport, getSupabase, getVerdictStatsForMessages, type ReportMessageRow } from '../db/client';
+import { apiKeyAuth } from '../middleware/auth';
+import { computeReportStats, computeVolumeChangePercent, type ReportMessageInput } from '../reports';
+
+export const reportsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+reportsRoute.get('/v1/reports', apiKeyAuth, async (c) => {
+  const period: ReportPeriod = c.req.query('period') === 'month' ? 'month' : 'week';
+  const periodMs = period === 'month' ? MONTH_MS : WEEK_MS;
+
+  const nowMs = Date.now();
+  const rangeEnd = new Date(nowMs).toISOString();
+  const rangeStart = new Date(nowMs - periodMs).toISOString();
+  const previousStart = new Date(nowMs - 2 * periodMs).toISOString();
+
+  const db = getSupabase(c.env);
+  const userId = c.get('userId');
+
+  const [currentRows, previousRows] = await Promise.all([
+    getMessagesForReport(db, userId, rangeStart, rangeEnd),
+    getMessagesForReport(db, userId, previousStart, rangeStart),
+  ]);
+  const [current, previous] = await Promise.all([buildReportPeriodStats(db, currentRows), buildReportPeriodStats(db, previousRows)]);
+
+  const response: ReportsResponse = {
+    period,
+    rangeStart,
+    rangeEnd,
+    current,
+    previous,
+    volumeChangePercent: computeVolumeChangePercent(current.totalSent, previous.totalSent),
+  };
+  return c.json(response);
+});
+
+async function buildReportPeriodStats(db: SupabaseClient, rows: ReportMessageRow[]): Promise<ReportPeriodStats> {
+  const verdictStats = await getVerdictStatsForMessages(
+    db,
+    rows.map((r) => r.id),
+  );
+  const inputs: ReportMessageInput[] = rows.map((row) => {
+    const stats = verdictStats.get(row.id);
+    return {
+      sentAt: row.sent_at,
+      recipient: row.recipient,
+      readConfidence: stats?.readConfidence ?? null,
+      openCount: stats?.openCount ?? 0,
+      clickCount: stats?.clickCount ?? 0,
+      firstOpenedAt: stats?.firstOpenedAt ?? null,
+      bounced: row.bounce_detected_at !== null,
+    };
+  });
+  return computeReportStats(inputs);
+}
