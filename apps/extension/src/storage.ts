@@ -18,6 +18,19 @@ export interface MailTrackSettings {
   /** User-configurable follow-up-reminder thresholds (see follow-up.ts) — replaces the previously-hardcoded 3/5-day constants. */
   followUpNotOpenedDays: number;
   followUpOpenedNoReplyDays: number;
+  /**
+   * Per-alert-type notification toggles — all gated behind the master
+   * `notificationsEnabled` switch above, so turning that off still silences
+   * everything regardless of these. Lets a user keep e.g. reply alerts on
+   * while muting routine open notifications, instead of all-or-nothing.
+   */
+  notifyOnOpen: boolean;
+  notifyOnClick: boolean;
+  notifyOnReply: boolean;
+  notifyOnBounce: boolean;
+  notifyOnHotConversation: boolean;
+  notifyOnRevival: boolean;
+  notifyOnFollowUp: boolean;
 }
 
 const DEFAULT_SETTINGS: MailTrackSettings = {
@@ -28,6 +41,13 @@ const DEFAULT_SETTINGS: MailTrackSettings = {
   bounceDetectionEnabled: true,
   followUpNotOpenedDays: 3,
   followUpOpenedNoReplyDays: 5,
+  notifyOnOpen: true,
+  notifyOnClick: true,
+  notifyOnReply: true,
+  notifyOnBounce: true,
+  notifyOnHotConversation: true,
+  notifyOnRevival: true,
+  notifyOnFollowUp: true,
 };
 
 const SETTINGS_KEY = 'mailtrack:settings';

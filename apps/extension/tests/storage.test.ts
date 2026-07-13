@@ -43,6 +43,13 @@ describe('storage', () => {
       bounceDetectionEnabled: true,
       followUpNotOpenedDays: 3,
       followUpOpenedNoReplyDays: 5,
+      notifyOnOpen: true,
+      notifyOnClick: true,
+      notifyOnReply: true,
+      notifyOnBounce: true,
+      notifyOnHotConversation: true,
+      notifyOnRevival: true,
+      notifyOnFollowUp: true,
     });
   });
 
