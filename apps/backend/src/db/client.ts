@@ -494,6 +494,49 @@ export async function hasActiveSubscription(db: SupabaseClient, userId: string):
   return data !== null;
 }
 
+/** All verified-open timestamps for a message, sorted ascending — feeds isHotConversation/isRevival (engagement-alerts.ts). */
+export async function getVerifiedOpenTimestamps(db: SupabaseClient, messageId: string): Promise<string[]> {
+  const { data, error } = await db
+    .from('verdicts')
+    .select('created_at, raw_events(occurred_at)')
+    .eq('message_id', messageId)
+    .eq('verdict', 'verified_open')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row) => {
+    const rawEvent = Array.isArray(row.raw_events) ? row.raw_events[0] : row.raw_events;
+    return rawEvent?.occurred_at ?? row.created_at;
+  });
+}
+
+export interface RecentOpenEvent {
+  messageId: string;
+  occurredAt: string;
+  recipient: string | null;
+  subject: string | null;
+}
+
+/** Verified opens classified since the last poll, across this user's messages — used to detect fresh Hot Conversation / Revival alerts. */
+export async function getRecentVerifiedOpens(db: SupabaseClient, userId: string, sinceIso: string): Promise<RecentOpenEvent[]> {
+  const { data, error } = await db
+    .from('verdicts')
+    .select('message_id, created_at, raw_events(occurred_at), messages!inner(recipient, subject, user_id)')
+    .eq('verdict', 'verified_open')
+    .eq('messages.user_id', userId)
+    .gt('created_at', sinceIso);
+  if (error) throw error;
+  return (data ?? []).map((row) => {
+    const rawEvent = Array.isArray(row.raw_events) ? row.raw_events[0] : row.raw_events;
+    const message = Array.isArray(row.messages) ? row.messages[0] : row.messages;
+    return {
+      messageId: row.message_id,
+      occurredAt: rawEvent?.occurred_at ?? row.created_at,
+      recipient: message?.recipient ?? null,
+      subject: message?.subject ?? null,
+    };
+  });
+}
+
 export async function markRawEventClassified(db: SupabaseClient, eventId: string): Promise<void> {
   const { error } = await db.from('raw_events').update({ classified_at: new Date().toISOString() }).eq('id', eventId);
   if (error) throw error;
