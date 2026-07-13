@@ -1,10 +1,10 @@
-import { getMessageTimeline, listMessages } from '../../src/api-client';
+import { getMessageTimeline, getReports, listMessages } from '../../src/api-client';
 import { formatSentAt, truncateSubject } from '../../src/dashboard-format';
 import { getFollowUpSuggestion, type FollowUpThresholds } from '../../src/follow-up';
 import { getSettings } from '../../src/storage';
 import { describeStatus } from '../../src/status-chip';
 import { describeReadConfidence } from '../../src/read-confidence-chip';
-import type { MessageSummary } from '@mailtrack/shared';
+import type { MessageSummary, ReportPeriod } from '@mailtrack/shared';
 
 const signedOutNotice = document.getElementById('signedOutNotice') as HTMLParagraphElement;
 const loadingEl = document.getElementById('loading') as HTMLParagraphElement;
@@ -20,6 +20,25 @@ const statTotalEl = document.getElementById('statTotal') as HTMLDivElement;
 const statOpenedEl = document.getElementById('statOpened') as HTMLDivElement;
 const statClickedEl = document.getElementById('statClicked') as HTMLDivElement;
 const statFollowUpEl = document.getElementById('statFollowUp') as HTMLDivElement;
+
+const tabRow = document.getElementById('tabRow') as HTMLDivElement;
+const messagesTab = document.getElementById('messagesTab') as HTMLButtonElement;
+const reportsTab = document.getElementById('reportsTab') as HTMLButtonElement;
+const reportsPanel = document.getElementById('reportsPanel') as HTMLDivElement;
+const reportPeriodSelect = document.getElementById('reportPeriod') as HTMLSelectElement;
+const reportVolumeChangeEl = document.getElementById('reportVolumeChange') as HTMLSpanElement;
+const reportLoadingEl = document.getElementById('reportLoading') as HTMLDivElement;
+const reportBodyEl = document.getElementById('reportBody') as HTMLDivElement;
+const reportTotalSentEl = document.getElementById('reportTotalSent') as HTMLDivElement;
+const reportOpenRateEl = document.getElementById('reportOpenRate') as HTMLDivElement;
+const reportClickRateEl = document.getElementById('reportClickRate') as HTMLDivElement;
+const reportBouncesEl = document.getElementById('reportBounces') as HTMLDivElement;
+const reportTimeToOpenEl = document.getElementById('reportTimeToOpen') as HTMLDivElement;
+const reportNotVerifiableEl = document.getElementById('reportNotVerifiable') as HTMLDivElement;
+const hourHeatmapEl = document.getElementById('hourHeatmap') as HTMLDivElement;
+const topRecipientsBody = document.getElementById('topRecipientsBody') as HTMLTableSectionElement;
+const reportEmptyEl = document.getElementById('reportEmpty') as HTMLParagraphElement;
+
 const COLUMN_COUNT = 6;
 const POLL_INTERVAL_MS = 5000;
 const PAGE_SIZE = 50; // must match apps/backend LIST_PAGE_SIZE
@@ -52,9 +71,90 @@ async function init(): Promise<void> {
     return;
   }
 
+  tabRow.style.display = '';
   content.style.display = '';
   await loadPage();
   startPolling();
+}
+
+function showMessagesTab(): void {
+  messagesTab.classList.add('active');
+  reportsTab.classList.remove('active');
+  content.style.display = '';
+  reportsPanel.classList.remove('visible');
+}
+
+function showReportsTab(): void {
+  reportsTab.classList.add('active');
+  messagesTab.classList.remove('active');
+  content.style.display = 'none';
+  reportsPanel.classList.add('visible');
+  loadReport().catch(() => {
+    reportLoadingEl.textContent = 'Could not load the report. Try again in a moment.';
+  });
+}
+
+messagesTab.addEventListener('click', showMessagesTab);
+reportsTab.addEventListener('click', showReportsTab);
+reportPeriodSelect.addEventListener('change', () => {
+  loadReport().catch(() => {
+    reportLoadingEl.textContent = 'Could not load the report. Try again in a moment.';
+  });
+});
+
+function formatMinutes(minutes: number): string {
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${hours.toFixed(1)}h`;
+  return `${(hours / 24).toFixed(1)}d`;
+}
+
+async function loadReport(): Promise<void> {
+  if (!apiKey) return;
+  reportLoadingEl.style.display = '';
+  reportLoadingEl.textContent = 'Loading report…';
+  reportBodyEl.style.display = 'none';
+
+  const period = reportPeriodSelect.value as ReportPeriod;
+  const report = await getReports(apiKey, period);
+  const { current, volumeChangePercent } = report;
+
+  reportTotalSentEl.textContent = String(current.totalSent);
+  reportOpenRateEl.textContent = `${Math.round(current.openRate * 100)}%`;
+  reportClickRateEl.textContent = `${Math.round(current.clickThroughRate * 100)}%`;
+  reportBouncesEl.textContent = String(current.bounceCount);
+  reportTimeToOpenEl.textContent = current.avgTimeToOpenMinutes !== null ? formatMinutes(current.avgTimeToOpenMinutes) : '—';
+  reportNotVerifiableEl.textContent = String(current.notVerifiableCount);
+
+  if (volumeChangePercent === null) {
+    reportVolumeChangeEl.textContent = '';
+    reportVolumeChangeEl.className = 'report-volume-change';
+  } else {
+    const sign = volumeChangePercent >= 0 ? '+' : '';
+    reportVolumeChangeEl.textContent = `${sign}${volumeChangePercent}% vs previous period`;
+    reportVolumeChangeEl.className = `report-volume-change ${volumeChangePercent >= 0 ? 'up' : 'down'}`;
+  }
+
+  hourHeatmapEl.innerHTML = '';
+  const maxHourCount = Math.max(1, ...current.sendsByHourUtc);
+  for (const count of current.sendsByHourUtc) {
+    const bar = document.createElement('div');
+    bar.className = 'hour-bar';
+    bar.style.height = `${Math.max(2, (count / maxHourCount) * 80)}px`;
+    bar.title = `${count} sent`;
+    hourHeatmapEl.appendChild(bar);
+  }
+
+  topRecipientsBody.innerHTML = '';
+  for (const r of current.topRecipients) {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td>${escapeHtml(r.recipient)}</td><td>${r.sentCount}</td><td>${r.openedCount}</td>`;
+    topRecipientsBody.appendChild(row);
+  }
+
+  reportEmptyEl.classList.toggle('visible', current.totalSent === 0);
+  reportLoadingEl.style.display = 'none';
+  reportBodyEl.style.display = '';
 }
 
 function startPolling(): void {

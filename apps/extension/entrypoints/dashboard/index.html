@@ -75,6 +75,33 @@
       .empty { color: var(--muted); padding: 2rem 0; text-align: center; }
       #loadMore { display: block; margin: 1rem auto 0; font-size: 0.85rem; padding: 0.5rem 1.25rem; cursor: pointer; border: 1px solid var(--border); border-radius: 6px; background: none; }
       #loading { color: var(--muted); }
+
+      .tab-row { display: flex; gap: 0.4rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-soft); }
+      .tab-btn { font-size: 0.85rem; font-weight: 500; padding: 0.55rem 0.9rem; cursor: pointer; background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); margin-bottom: -1px; }
+      .tab-btn.active { color: var(--brand); border-bottom-color: var(--brand); font-weight: 600; }
+
+      #reportsPanel { display: none; }
+      #reportsPanel.visible { display: block; }
+      .report-controls { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; }
+      .report-controls select { font-size: 0.82rem; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--ink); }
+      .report-volume-change { font-size: 0.82rem; color: var(--muted); }
+      .report-volume-change.up { color: var(--green); }
+      .report-volume-change.down { color: var(--red); }
+      .report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.75rem; }
+      .report-card { border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1rem; }
+      .report-card .value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
+      .report-card .label { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+
+      .report-section-title { font-size: 0.85rem; font-weight: 600; margin: 0 0 0.75rem; }
+      .hour-heatmap { display: flex; align-items: flex-end; gap: 2px; height: 80px; margin-bottom: 1.75rem; }
+      .hour-bar { flex: 1; background: var(--brand); border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.75; }
+      .hour-bar:hover { opacity: 1; }
+
+      .top-recipients-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+      .top-recipients-table th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
+      .top-recipients-table td { padding: 0.5rem; border-bottom: 1px solid var(--border-soft); font-size: 0.85rem; }
+      .report-empty { color: var(--muted); padding: 2rem 0; text-align: center; display: none; }
+      .report-empty.visible { display: block; }
     </style>
   </head>
   <body>
@@ -89,6 +116,11 @@
     <p class="subtitle">Verified opens, clicks, and replies only — never a raw pixel fetch.</p>
     <p id="signedOutNotice">Open the MailTrack popup from your toolbar to sign in first.</p>
     <p id="loading">Loading…</p>
+
+    <div id="tabRow" class="tab-row" style="display:none">
+      <button class="tab-btn active" id="messagesTab">Messages</button>
+      <button class="tab-btn" id="reportsTab">Reports</button>
+    </div>
 
     <div id="content" style="display:none">
       <div class="summary-row">
@@ -135,6 +167,38 @@
       <p id="emptyState" class="empty" style="display:none">No tracked messages yet. Send a tracked email from Gmail to see it here.</p>
       <p id="filteredEmptyState" class="empty">No messages match your search or filter.</p>
       <button id="loadMore" style="display:none">Load more</button>
+    </div>
+
+    <div id="reportsPanel">
+      <div class="report-controls">
+        <select id="reportPeriod">
+          <option value="week">Last 7 days</option>
+          <option value="month">Last 30 days</option>
+        </select>
+        <span id="reportVolumeChange" class="report-volume-change"></span>
+      </div>
+
+      <div id="reportLoading" class="muted">Loading report…</div>
+      <div id="reportBody" style="display:none">
+        <div class="report-grid">
+          <div class="report-card"><div class="value" id="reportTotalSent">0</div><div class="label">Sent</div></div>
+          <div class="report-card"><div class="value" id="reportOpenRate">0%</div><div class="label">Open rate</div></div>
+          <div class="report-card"><div class="value" id="reportClickRate">0%</div><div class="label">Click-through rate</div></div>
+          <div class="report-card"><div class="value" id="reportBounces">0</div><div class="label">Bounces</div></div>
+          <div class="report-card"><div class="value" id="reportTimeToOpen">—</div><div class="label">Avg. time to open</div></div>
+          <div class="report-card"><div class="value" id="reportNotVerifiable">0</div><div class="label">Not verifiable</div></div>
+        </div>
+
+        <p class="report-section-title">Sends by hour (UTC)</p>
+        <div class="hour-heatmap" id="hourHeatmap"></div>
+
+        <p class="report-section-title">Top recipients</p>
+        <table class="top-recipients-table" id="topRecipientsTable">
+          <thead><tr><th>Recipient</th><th>Sent</th><th>Opened</th></tr></thead>
+          <tbody id="topRecipientsBody"></tbody>
+        </table>
+        <p class="report-empty" id="reportEmpty">No tracked emails in this period yet.</p>
+      </div>
     </div>
 
     <script type="module" src="./main.ts"></script>
