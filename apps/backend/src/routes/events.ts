@@ -1,7 +1,17 @@
 import { Hono } from 'hono';
 import type { EventsPollResponse, MessageListResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
-import { deleteMessage, getMessageById, getMessageTimeline, getSupabase, getVerdictStatsForMessages, listMessagesForUser } from '../db/client';
+import {
+  deleteMessage,
+  getMessageById,
+  getMessageTimeline,
+  getRecentVerifiedOpens,
+  getSupabase,
+  getVerdictStatsForMessages,
+  getVerifiedOpenTimestamps,
+  listMessagesForUser,
+} from '../db/client';
+import { isHotConversation, isRevival } from '../engagement-alerts';
 import { apiKeyAuth } from '../middleware/auth';
 import { buildPollUpdates } from '../poll-updates';
 
@@ -164,9 +174,41 @@ eventsRoute.get('/v1/events/poll', async (c) => {
     return c.json({ error: 'Query failed' }, 500);
   }
 
+  const updates = buildPollUpdates(statusResult.data ?? [], bounceResult.data ?? []);
+
+  // Hot Conversation / Revival alerts (see engagement-alerts.ts): unlike the
+  // status-ladder events above, these can fire on ANY new verified open, not
+  // just the first one that flips a message to 'opened' — so they need
+  // their own query rather than reusing statusResult. Naturally fires at
+  // most once per new open (a message only appears here again once it has
+  // a genuinely new open since the last poll), so there's no need for
+  // separate de-dup bookkeeping.
+  try {
+    const recentOpens = await getRecentVerifiedOpens(db, userId, sinceDate.toISOString());
+    const seenMessageIds = new Set<string>();
+    for (const open of recentOpens) {
+      if (seenMessageIds.has(open.messageId)) continue;
+      seenMessageIds.add(open.messageId);
+
+      const allOpens = await getVerifiedOpenTimestamps(db, open.messageId);
+      const latestOccurredAt = allOpens[allOpens.length - 1] ?? open.occurredAt;
+      if (isHotConversation(allOpens)) {
+        updates.push({ msgId: open.messageId, event: 'hot_conversation', occurredAt: latestOccurredAt, recipient: open.recipient, subject: open.subject });
+      }
+      if (isRevival(allOpens)) {
+        updates.push({ msgId: open.messageId, event: 'revival', occurredAt: latestOccurredAt, recipient: open.recipient, subject: open.subject });
+      }
+    }
+  } catch (err) {
+    // Engagement alerts are a bonus signal on top of the core poll response
+    // — a failure here must never break opened/clicked/replied/bounced
+    // notifications, which have already been computed above.
+    console.error('[events/poll] engagement-alert detection failed:', err);
+  }
+
   const response: EventsPollResponse = {
     polledAt: new Date().toISOString(),
-    updates: buildPollUpdates(statusResult.data ?? [], bounceResult.data ?? []),
+    updates,
   };
   return c.json(response);
 });
