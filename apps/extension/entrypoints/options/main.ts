@@ -14,6 +14,8 @@ const apiKeyInput = document.getElementById('apiKey') as HTMLInputElement;
 const trackingEnabledInput = document.getElementById('trackingEnabled') as HTMLInputElement;
 const notificationsEnabledInput = document.getElementById('notificationsEnabled') as HTMLInputElement;
 const bounceDetectionEnabledInput = document.getElementById('bounceDetectionEnabled') as HTMLInputElement;
+const followUpNotOpenedDaysInput = document.getElementById('followUpNotOpenedDays') as HTMLInputElement;
+const followUpOpenedNoReplyDaysInput = document.getElementById('followUpOpenedNoReplyDays') as HTMLInputElement;
 const statusEl = document.getElementById('status') as HTMLDivElement;
 
 const billingCard = document.getElementById('billingCard') as HTMLDivElement;
@@ -33,6 +35,8 @@ async function refreshView(): Promise<void> {
     trackingEnabledInput.checked = settings.trackingEnabledByDefault;
     notificationsEnabledInput.checked = settings.notificationsEnabled;
     bounceDetectionEnabledInput.checked = settings.bounceDetectionEnabled;
+    followUpNotOpenedDaysInput.value = String(settings.followUpNotOpenedDays);
+    followUpOpenedNoReplyDaysInput.value = String(settings.followUpOpenedNoReplyDays);
     await refreshBillingStatus(settings.apiKey!);
   }
 }
@@ -110,10 +114,16 @@ document.getElementById('signOut')?.addEventListener('click', async () => {
 });
 
 document.getElementById('save')?.addEventListener('click', async () => {
+  // Clamp to the same [1, 90] range the inputs enforce visually — a pasted
+  // or programmatically-set out-of-range value shouldn't silently persist.
+  const notOpenedDays = Math.min(90, Math.max(1, Number(followUpNotOpenedDaysInput.value) || 3));
+  const openedNoReplyDays = Math.min(90, Math.max(1, Number(followUpOpenedNoReplyDaysInput.value) || 5));
   await setSettings({
     trackingEnabledByDefault: trackingEnabledInput.checked,
     notificationsEnabled: notificationsEnabledInput.checked,
     bounceDetectionEnabled: bounceDetectionEnabledInput.checked,
+    followUpNotOpenedDays: notOpenedDays,
+    followUpOpenedNoReplyDays: openedNoReplyDays,
   });
   statusEl.textContent = 'Saved.';
   setTimeout(() => (statusEl.textContent = ''), 2000);

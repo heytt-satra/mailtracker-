@@ -21,6 +21,9 @@
       }
       input:focus { outline: none; border-color: var(--brand); background: var(--bg); }
 
+      .field-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.85rem; }
+      .field-row .field-label { margin: 0; font-weight: 400; color: var(--ink); }
+      .field-row input[type="number"] { margin-bottom: 0; padding: 0.4rem 0.5rem; }
       .toggle-row { display: flex; align-items: flex-start; gap: 0.65rem; margin-bottom: 0.85rem; }
       .toggle-row:last-child { margin-bottom: 0; }
       .toggle-row input[type="checkbox"] { width: 1.05rem; height: 1.05rem; margin-top: 0.1rem; accent-color: var(--brand); flex-shrink: 0; cursor: pointer; }
@@ -88,6 +91,14 @@
         <div class="toggle-row"><input type="checkbox" id="trackingEnabled" /><label for="trackingEnabled">Track new emails by default</label></div>
         <div class="toggle-row"><input type="checkbox" id="notificationsEnabled" /><label for="notificationsEnabled">Notify me on verified opens and clicks</label></div>
         <div class="toggle-row"><input type="checkbox" id="bounceDetectionEnabled" /><label for="bounceDetectionEnabled">Detect hard bounces<span class="sub">Reads bounce-notification emails in your inbox to flag messages that never arrived.</span></label></div>
+        <div class="field-row">
+          <label class="field-label" for="followUpNotOpenedDays">Follow-up if not opened after (days)</label>
+          <input type="number" id="followUpNotOpenedDays" min="1" max="90" style="width:5rem" />
+        </div>
+        <div class="field-row">
+          <label class="field-label" for="followUpOpenedNoReplyDays">Follow-up if opened but no reply after (days)</label>
+          <input type="number" id="followUpOpenedNoReplyDays" min="1" max="90" style="width:5rem" />
+        </div>
         <div class="button-row">
           <button class="mt-btn mt-btn-primary" id="save">Save preferences</button>
           <button class="mt-btn mt-btn-ghost" id="signOut">Sign out</button>
