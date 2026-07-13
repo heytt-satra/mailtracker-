@@ -1,6 +1,11 @@
 import { createCheckout, deleteMessage, exportMessageCsv, getBillingStatus, provisionApiKey } from '../../src/api-client';
 import { logInWithEmail, signUpWithEmail } from '../../src/auth';
-import { getSettings, setSettings } from '../../src/storage';
+import { getSettings, setSettings, type MailTrackSettings } from '../../src/storage';
+
+// Element ids match the MailTrackSettings key of the same name exactly —
+// keeps this list in sync with storage.ts's per-alert toggles without
+// hand-writing a getter/setter pair for each one.
+const NOTIFY_TOGGLE_KEYS = ['notifyOnOpen', 'notifyOnClick', 'notifyOnReply', 'notifyOnBounce', 'notifyOnHotConversation', 'notifyOnRevival', 'notifyOnFollowUp'] as const satisfies readonly (keyof MailTrackSettings)[];
 
 const signedOutPanel = document.getElementById('signedOutPanel') as HTMLDivElement;
 const signedInPanel = document.getElementById('signedInPanel') as HTMLDivElement;
@@ -37,6 +42,10 @@ async function refreshView(): Promise<void> {
     bounceDetectionEnabledInput.checked = settings.bounceDetectionEnabled;
     followUpNotOpenedDaysInput.value = String(settings.followUpNotOpenedDays);
     followUpOpenedNoReplyDaysInput.value = String(settings.followUpOpenedNoReplyDays);
+    for (const key of NOTIFY_TOGGLE_KEYS) {
+      const input = document.getElementById(key) as HTMLInputElement | null;
+      if (input) input.checked = Boolean(settings[key]);
+    }
     await refreshBillingStatus(settings.apiKey!);
   }
 }
@@ -118,12 +127,16 @@ document.getElementById('save')?.addEventListener('click', async () => {
   // or programmatically-set out-of-range value shouldn't silently persist.
   const notOpenedDays = Math.min(90, Math.max(1, Number(followUpNotOpenedDaysInput.value) || 3));
   const openedNoReplyDays = Math.min(90, Math.max(1, Number(followUpOpenedNoReplyDaysInput.value) || 5));
+  const notifyToggles = Object.fromEntries(
+    NOTIFY_TOGGLE_KEYS.map((key) => [key, (document.getElementById(key) as HTMLInputElement | null)?.checked ?? true]),
+  ) as Record<(typeof NOTIFY_TOGGLE_KEYS)[number], boolean>;
   await setSettings({
     trackingEnabledByDefault: trackingEnabledInput.checked,
     notificationsEnabled: notificationsEnabledInput.checked,
     bounceDetectionEnabled: bounceDetectionEnabledInput.checked,
     followUpNotOpenedDays: notOpenedDays,
     followUpOpenedNoReplyDays: openedNoReplyDays,
+    ...notifyToggles,
   });
   statusEl.textContent = 'Saved.';
   setTimeout(() => (statusEl.textContent = ''), 2000);
