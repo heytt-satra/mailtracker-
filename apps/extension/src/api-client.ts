@@ -9,8 +9,10 @@ import type {
   MessageStatusResponse,
   ReportBounceRequest,
   ReportBounceResponse,
+  ReportPeriod,
   ReportReplyRequest,
   ReportReplyResponse,
+  ReportsResponse,
   TimelineEvent,
 } from '@mailtrack/shared';
 import { MAILTRACK_API_BASE_URL } from './config';
@@ -82,6 +84,11 @@ export function createCheckout(apiKey: string, body: CreateCheckoutRequest): Pro
 
 export function getBillingStatus(apiKey: string): Promise<BillingStatusResponse> {
   return request<BillingStatusResponse>('/v1/billing/status', apiKey);
+}
+
+/** ADR-39. Weekly/monthly report — every number is a real aggregate over already-tracked data. */
+export function getReports(apiKey: string, period: ReportPeriod): Promise<ReportsResponse> {
+  return request<ReportsResponse>(`/v1/reports?period=${period}`, apiKey);
 }
 
 export async function exportMessageCsv(apiKey: string, msgId: string): Promise<string> {
