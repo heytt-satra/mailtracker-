@@ -270,6 +270,15 @@ export interface ReportTopRecipient {
   recipient: string;
   sentCount: number;
   openedCount: number;
+  openRate: number;
+}
+
+export interface ReportReadConfidenceBreakdown {
+  read: number;
+  likelyRead: number;
+  glanced: number;
+  notVerifiable: number;
+  pending: number;
 }
 
 export interface ReportPeriodStats {
@@ -278,10 +287,18 @@ export interface ReportPeriodStats {
   clickCount: number;
   bounceCount: number;
   notVerifiableCount: number;
+  repliedCount: number;
+  totalOpens: number;
+  totalClicks: number;
   openRate: number;
   clickThroughRate: number;
+  replyRate: number;
+  bounceRate: number;
   avgTimeToOpenMinutes: number | null;
+  medianTimeToOpenMinutes: number | null;
   sendsByHourUtc: number[];
+  sendsByDayOfWeekUtc: number[];
+  readConfidenceBreakdown: ReportReadConfidenceBreakdown;
   topRecipients: ReportTopRecipient[];
 }
 

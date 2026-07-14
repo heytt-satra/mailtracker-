@@ -55,6 +55,7 @@ async function buildReportPeriodStats(db: SupabaseClient, rows: ReportMessageRow
       clickCount: stats?.clickCount ?? 0,
       firstOpenedAt: stats?.firstOpenedAt ?? null,
       bounced: row.bounce_detected_at !== null,
+      replied: row.reply_detected_at !== null,
     };
   });
   return computeReportStats(inputs);

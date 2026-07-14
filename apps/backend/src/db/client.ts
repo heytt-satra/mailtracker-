@@ -127,6 +127,7 @@ export interface ReportMessageRow {
   recipient: string | null;
   sent_at: string;
   bounce_detected_at: string | null;
+  reply_detected_at: string | null;
 }
 
 /**
@@ -141,7 +142,7 @@ const MAX_REPORT_MESSAGES = 2000;
 export async function getMessagesForReport(db: SupabaseClient, userId: string, startIso: string, endIso: string): Promise<ReportMessageRow[]> {
   const { data, error } = await db
     .from('messages')
-    .select('id, recipient, sent_at, bounce_detected_at')
+    .select('id, recipient, sent_at, bounce_detected_at, reply_detected_at')
     .eq('user_id', userId)
     .gte('sent_at', startIso)
     .lt('sent_at', endIso)
