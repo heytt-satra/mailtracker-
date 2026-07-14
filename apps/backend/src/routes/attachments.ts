@@ -69,5 +69,13 @@ attachmentsRoute.get('/attachments/:token', async (c) => {
 
   c.header('Content-Type', 'application/pdf');
   c.header('Cache-Control', 'private, max-age=3600');
+  // ADR-46 (file upload safety): the Content-Type above is set unconditionally
+  // here regardless of what's stored (the upload path already verified real
+  // PDF magic bytes) — nosniff additionally stops a browser from ever
+  // second-guessing that declared type and trying to execute/render the
+  // response as something else (e.g. HTML), the standard defense against a
+  // served file being treated as active content.
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Content-Disposition', 'inline');
   return c.body(object.body);
 });

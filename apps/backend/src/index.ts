@@ -52,6 +52,22 @@ app.route('/', attachmentsRoute);
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 
+/**
+ * ADR-46 (error handling / information leakage). Hono's own default error
+ * handler already logs server-side and returns an opaque body on an
+ * uncaught exception (confirmed by reading hono-base.js directly — no
+ * stack trace, no error message, ever reaches the response) — this
+ * override isn't fixing a leak, it's fixing an inconsistency: every other
+ * error in this API is `{ error: string }` JSON, while Hono's default
+ * returns plain text, which a JSON-only API client could choke on.
+ * `console.error` still runs first so nothing here reduces server-side
+ * debuggability.
+ */
+app.onError((err, c) => {
+  console.error(`[unhandled] ${c.req.method} ${c.req.path}:`, err);
+  return c.json({ error: 'Internal server error' }, 500);
+});
+
 export default {
   fetch: app.fetch,
 
