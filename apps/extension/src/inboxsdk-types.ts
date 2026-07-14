@@ -45,7 +45,10 @@ export interface ComposeView {
   getHTMLContent: () => string;
   setBodyHTML: (html: string) => void;
   getSubject: () => string;
+  setSubject: (text: string) => void;
   getToRecipients: () => Contact[];
+  /** ADR-40. Used both to strip a compose down to a single recipient (mail merge) and, generally, to set recipients programmatically. */
+  setToRecipients: (emails: string[]) => void;
   send: (options?: { sendAndArchive?: boolean }) => void;
   /** ADR-38. Reopens the schedule-send date/time menu — called after injection completes, to resume the flow we cancelled in `scheduleSendMenuOpening`. */
   openScheduleSendMenu: () => void;
@@ -80,8 +83,14 @@ export interface MessageView {
 export interface InboxSDKInstance {
   Compose: {
     registerComposeViewHandler: (handler: (composeView: ComposeView) => void) => void;
+    /** ADR-40. Opens a blank compose window programmatically — used by mail merge to send each additional recipient their own personalized copy. Confirmed against the installed package's own compose.d.ts. */
+    openNewComposeView: () => Promise<ComposeView>;
   };
   Conversations: {
     registerMessageViewHandlerAll: (handler: (messageView: MessageView) => void) => void;
+  };
+  /** ADR-41. Confirmed against the installed package's own user.d.ts — identifies which Google account this Gmail tab is signed into, for per-account settings. */
+  User: {
+    getEmailAddress: () => string;
   };
 }
