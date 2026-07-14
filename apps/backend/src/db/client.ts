@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { AsnIntel, BeaconPosition, EventKind, IntelCategory, MessageStatus, Verdict } from '@mailtrack/shared';
+import type { AsnIntel, BeaconPosition, EventKind, IntelCategory, MessageStatus, MessageSummary, Verdict } from '@mailtrack/shared';
 import type { Env } from '../types';
 import { computeReadSignal, type ReadSignal } from '../read-signal';
 import { computeDepthReached } from '../depth-signal';
@@ -122,30 +122,27 @@ export async function listMessagesForUser(
   return { rows, nextOffset: rows.length === LIST_PAGE_SIZE ? offset + LIST_PAGE_SIZE : null };
 }
 
-export interface ReportMessageRow {
-  id: string;
-  recipient: string | null;
-  sent_at: string;
-  bounce_detected_at: string | null;
-  reply_detected_at: string | null;
-}
-
 /**
  * All of a user's messages sent within [startIso, endIso) — feeds the
- * weekly/monthly reports tab (reports.ts::computeReportStats). Capped at
- * MAX_REPORT_MESSAGES so a very large send history can't turn a report
- * request into an unbounded query; a report is a rough trend view, not an
- * exhaustive export (CSV export already covers the single-message case).
+ * weekly/monthly reports tab (reports.ts::computeReportStats). Same row
+ * shape as listMessagesForUser (MessageSummaryRow) so routes/reports.ts can
+ * reuse buildMessageSummary() to attach a full per-message detail list
+ * (including reply/bounce evidence) alongside the aggregate stats, not just
+ * recipient/sent_at. Capped at MAX_REPORT_MESSAGES so a very large send
+ * history can't turn a report request into an unbounded query; a report is
+ * a rough trend view, not an exhaustive export (CSV export already covers
+ * the single-message case).
  */
 const MAX_REPORT_MESSAGES = 2000;
 
-export async function getMessagesForReport(db: SupabaseClient, userId: string, startIso: string, endIso: string): Promise<ReportMessageRow[]> {
+export async function getMessagesForReport(db: SupabaseClient, userId: string, startIso: string, endIso: string): Promise<MessageSummaryRow[]> {
   const { data, error } = await db
     .from('messages')
-    .select('id, recipient, sent_at, bounce_detected_at, reply_detected_at')
+    .select('id, subject, recipient, status, sent_at, bounce_detected_at, bounce_reason, reply_detected_at')
     .eq('user_id', userId)
     .gte('sent_at', startIso)
     .lt('sent_at', endIso)
+    .order('sent_at', { ascending: false })
     .limit(MAX_REPORT_MESSAGES);
   if (error) throw error;
   return data ?? [];
@@ -264,6 +261,39 @@ export async function getVerdictStatsForMessages(db: SupabaseClient, messageIds:
   }
 
   return stats;
+}
+
+const EMPTY_VERDICT_STATS: VerdictStats = {
+  openCount: 0,
+  clickCount: 0,
+  firstOpenedAt: null,
+  lastOpenedAt: null,
+  readConfidence: null,
+  minEngagedSeconds: null,
+  readEvidence: null,
+  depthReached: null,
+  sessionCount: null,
+  syncSuspect: false,
+};
+
+/**
+ * Maps a message row + its verdict stats into the shared `MessageSummary`
+ * shape the dashboard renders — factored out so `GET /v1/messages` (events.ts)
+ * and the reports endpoint (routes/reports.ts) build IDENTICAL rows from the
+ * same logic, instead of two hand-copies that could silently drift apart.
+ * ADR-21: a reply is definitive proof of reading, so it overrides the
+ * pixel/click-derived read confidence with the strongest possible verdict —
+ * no sync/proxy ambiguity can produce a reply — and its evidence text names
+ * the exact reply timestamp.
+ */
+export function buildMessageSummary(row: MessageSummaryRow, stats: VerdictStats | undefined): MessageSummary {
+  const rowStats = stats ?? EMPTY_VERDICT_STATS;
+  const bounce = row.bounce_detected_at ? { detectedAt: row.bounce_detected_at, reason: row.bounce_reason ?? '' } : null;
+  const reply = row.reply_detected_at ? { detectedAt: row.reply_detected_at } : null;
+  const withReply = reply
+    ? { ...rowStats, readConfidence: 'read' as const, readEvidence: `Replied to your email — definitive proof they read it (${reply.detectedAt}).` }
+    : rowStats;
+  return { msgId: row.id, subject: row.subject, recipient: row.recipient, status: row.status, sentAt: row.sent_at, ...withReply, bounce, reply };
 }
 
 export async function insertLinkTokens(

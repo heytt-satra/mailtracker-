@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ReportPeriod, ReportPeriodStats, ReportsResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
-import { getMessagesForReport, getSupabase, getVerdictStatsForMessages, type ReportMessageRow } from '../db/client';
+import { buildMessageSummary, getMessagesForReport, getSupabase, getVerdictStatsForMessages, type MessageSummaryRow } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { computeReportStats, computeVolumeChangePercent, type ReportMessageInput } from '../reports';
 
@@ -27,7 +27,10 @@ reportsRoute.get('/v1/reports', apiKeyAuth, async (c) => {
     getMessagesForReport(db, userId, rangeStart, rangeEnd),
     getMessagesForReport(db, userId, previousStart, rangeStart),
   ]);
-  const [current, previous] = await Promise.all([buildReportPeriodStats(db, currentRows), buildReportPeriodStats(db, previousRows)]);
+  const [current, previous] = await Promise.all([
+    buildReportPeriodStats(db, currentRows, { includeMessages: true }),
+    buildReportPeriodStats(db, previousRows, { includeMessages: false }),
+  ]);
 
   const response: ReportsResponse = {
     period,
@@ -40,7 +43,7 @@ reportsRoute.get('/v1/reports', apiKeyAuth, async (c) => {
   return c.json(response);
 });
 
-async function buildReportPeriodStats(db: SupabaseClient, rows: ReportMessageRow[]): Promise<ReportPeriodStats> {
+async function buildReportPeriodStats(db: SupabaseClient, rows: MessageSummaryRow[], opts: { includeMessages: boolean }): Promise<ReportPeriodStats> {
   const verdictStats = await getVerdictStatsForMessages(
     db,
     rows.map((r) => r.id),
@@ -58,5 +61,10 @@ async function buildReportPeriodStats(db: SupabaseClient, rows: ReportMessageRow
       replied: row.reply_detected_at !== null,
     };
   });
-  return computeReportStats(inputs);
+  const aggregate = computeReportStats(inputs);
+  // `previous` only ever backs the volume-change comparison — the dashboard
+  // has no use for its per-message detail, so skip building it there to
+  // avoid doubling the response's payload size for data nothing reads.
+  const messages = opts.includeMessages ? rows.map((row) => buildMessageSummary(row, verdictStats.get(row.id))) : [];
+  return { ...aggregate, messages };
 }

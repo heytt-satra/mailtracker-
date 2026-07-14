@@ -82,9 +82,15 @@ describe('computeReportStats', () => {
       msg({ recipient: 'c@x.com', readConfidence: null }),
     ];
     const stats = computeReportStats(messages);
-    expect(stats.topRecipients[0]).toEqual({ recipient: 'a@x.com', sentCount: 2, openedCount: 2, openRate: 1 });
-    expect(stats.topRecipients[1]).toEqual({ recipient: 'b@x.com', sentCount: 1, openedCount: 1, openRate: 1 });
-    expect(stats.topRecipients[2]).toEqual({ recipient: 'c@x.com', sentCount: 1, openedCount: 0, openRate: 0 });
+    expect(stats.topRecipients[0]).toEqual({ recipient: 'a@x.com', sentCount: 2, openedCount: 2, openRate: 1, totalOpenCount: 0, totalClickCount: 0 });
+    expect(stats.topRecipients[1]).toEqual({ recipient: 'b@x.com', sentCount: 1, openedCount: 1, openRate: 1, totalOpenCount: 0, totalClickCount: 0 });
+    expect(stats.topRecipients[2]).toEqual({ recipient: 'c@x.com', sentCount: 1, openedCount: 0, openRate: 0, totalOpenCount: 0, totalClickCount: 0 });
+  });
+
+  it('sums per-message open/click depth per recipient, distinct from the message-opened count', () => {
+    // One message opened 4 times should show totalOpenCount: 4, not openedCount: 1 (a count of MESSAGES, not opens).
+    const stats = computeReportStats([msg({ recipient: 'a@x.com', readConfidence: 'likely_read', openCount: 4, clickCount: 2 })]);
+    expect(stats.topRecipients[0]).toMatchObject({ openedCount: 1, totalOpenCount: 4, totalClickCount: 2 });
   });
 
   it('caps top recipients at 20', () => {

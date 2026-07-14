@@ -21,9 +21,14 @@ export interface ReportMessageInput {
 export interface TopRecipientStat {
   recipient: string;
   sentCount: number;
+  /** Count of messages to this recipient that reached a verified open — a count of MESSAGES, not of opens. */
   openedCount: number;
   /** openedCount / sentCount — always defined since sentCount is never 0 for a recipient entry. */
   openRate: number;
+  /** Sum of per-message open counts to this recipient — the actual engagement depth (e.g. one message opened 4 times is 4 here, 1 in openedCount). */
+  totalOpenCount: number;
+  /** Sum of per-message click counts to this recipient. */
+  totalClickCount: number;
 }
 
 /**
@@ -109,12 +114,14 @@ export function computeReportStats(messages: ReportMessageInput[]): ReportStats 
     sendsByDayOfWeekUtc[sentDate.getUTCDay()]++;
   }
 
-  const byRecipient = new Map<string, { sentCount: number; openedCount: number }>();
+  const byRecipient = new Map<string, { sentCount: number; openedCount: number; totalOpenCount: number; totalClickCount: number }>();
   for (const m of messages) {
     if (!m.recipient) continue;
-    const entry = byRecipient.get(m.recipient) ?? { sentCount: 0, openedCount: 0 };
+    const entry = byRecipient.get(m.recipient) ?? { sentCount: 0, openedCount: 0, totalOpenCount: 0, totalClickCount: 0 };
     entry.sentCount++;
     if (m.readConfidence === 'read' || m.readConfidence === 'likely_read') entry.openedCount++;
+    entry.totalOpenCount += m.openCount;
+    entry.totalClickCount += m.clickCount;
     byRecipient.set(m.recipient, entry);
   }
   const topRecipients: TopRecipientStat[] = [...byRecipient.entries()]

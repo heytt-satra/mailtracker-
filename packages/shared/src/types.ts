@@ -271,6 +271,8 @@ export interface ReportTopRecipient {
   sentCount: number;
   openedCount: number;
   openRate: number;
+  totalOpenCount: number;
+  totalClickCount: number;
 }
 
 export interface ReportReadConfidenceBreakdown {
@@ -300,6 +302,8 @@ export interface ReportPeriodStats {
   sendsByDayOfWeekUtc: number[];
   readConfidenceBreakdown: ReportReadConfidenceBreakdown;
   topRecipients: ReportTopRecipient[];
+  /** Every message sent in this period, newest-first, same shape as the Messages tab list — lets the dashboard show a full per-message + per-event drill-down, not just aggregates. Bounded by the same MAX_REPORT_MESSAGES cap as the aggregate stats above (apps/backend/src/db/client.ts). */
+  messages: MessageSummary[];
 }
 
 export interface ReportsResponse {

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { EventsPollResponse, MessageListResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
 import {
+  buildMessageSummary,
   deleteMessage,
   getMessageById,
   getMessageTimeline,
@@ -39,33 +40,7 @@ eventsRoute.get('/v1/messages', async (c) => {
   const { rows, nextOffset } = await listMessagesForUser(db, c.get('userId'), Number.isFinite(offset) && offset >= 0 ? offset : 0);
   const stats = await getVerdictStatsForMessages(db, rows.map((row) => row.id));
   const response: MessageListResponse = {
-    messages: rows.map((row) => {
-      const rowStats = stats.get(row.id) ?? {
-        openCount: 0,
-        clickCount: 0,
-        firstOpenedAt: null,
-        lastOpenedAt: null,
-        readConfidence: null,
-        minEngagedSeconds: null,
-        readEvidence: null,
-        depthReached: null,
-        sessionCount: null,
-        syncSuspect: false,
-      };
-      const bounce = row.bounce_detected_at ? { detectedAt: row.bounce_detected_at, reason: row.bounce_reason ?? '' } : null;
-      const reply = row.reply_detected_at ? { detectedAt: row.reply_detected_at } : null;
-      // ADR-21: a reply is definitive proof of reading, so it overrides the
-      // pixel/click-derived read confidence with the strongest possible
-      // verdict and evidence — no sync/proxy ambiguity can produce a reply.
-      const withReply = reply
-        ? {
-            ...rowStats,
-            readConfidence: 'read' as const,
-            readEvidence: `Replied to your email — definitive proof they read it (${reply.detectedAt}).`,
-          }
-        : rowStats;
-      return { msgId: row.id, subject: row.subject, recipient: row.recipient, status: row.status, sentAt: row.sent_at, ...withReply, bounce, reply };
-    }),
+    messages: rows.map((row) => buildMessageSummary(row, stats.get(row.id))),
     nextOffset,
   };
   return c.json(response);
