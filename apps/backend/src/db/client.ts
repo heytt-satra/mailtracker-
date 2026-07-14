@@ -44,6 +44,13 @@ export async function getUserById(db: SupabaseClient, userId: string): Promise<U
   return data;
 }
 
+/** ADR-48. Backs the single-user admin grant action — looks up by the email address on file (set at signup/login, see upsertUserApiKey), case-insensitively, since that's the only identifier an operator has for a specific account (never the internal uuid). */
+export async function getUserByEmail(db: SupabaseClient, email: string): Promise<UserWithEmailRow | null> {
+  const { data, error } = await db.from('users').select('id, email').ilike('email', email).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 /**
  * Called by POST /v1/auth/provision. `id` here is the Supabase Auth user's
  * own id (the "profiles" pattern — see db/migrations/0001_init.sql). Each

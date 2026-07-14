@@ -6,6 +6,7 @@ import {
   getActiveSubscriptionForUser,
   getAllUserIds,
   getSupabase,
+  getUserByEmail,
   getUserById,
   grantLifetimeSubscription,
   hasActiveSubscription,
@@ -122,10 +123,7 @@ billingRoute.post('/v1/billing/cancel', apiKeyAuth, async (c) => {
 billingRoute.post('/v1/admin/grant-lifetime-subscriptions', async (c) => {
   const rateLimited = await checkAdminRateLimit(c);
   if (rateLimited) return rateLimited;
-  const providedSecret = c.req.header('X-Admin-Secret');
-  if (!providedSecret || providedSecret !== c.env.ADMIN_SECRET) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
+  if (!hasValidAdminSecret(c)) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = getSupabase(c.env);
   const userIds = await getAllUserIds(db);
@@ -142,13 +140,42 @@ billingRoute.post('/v1/admin/grant-lifetime-subscriptions', async (c) => {
 billingRoute.post('/v1/admin/normalize-legacy-subscriptions', async (c) => {
   const rateLimited = await checkAdminRateLimit(c);
   if (rateLimited) return rateLimited;
-  const providedSecret = c.req.header('X-Admin-Secret');
-  if (!providedSecret || providedSecret !== c.env.ADMIN_SECRET) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
+  if (!hasValidAdminSecret(c)) return c.json({ error: 'Unauthorized' }, 401);
   const db = getSupabase(c.env);
   const normalized = await normalizeLegacyPlaceholderSubscriptions(db);
   return c.json({ normalized });
+});
+
+const grantSingleSchema = z.object({ email: z.string().trim().email() }).strict();
+
+/**
+ * ADR-48. Manually comps ONE specific account (looked up by email — the
+ * only identifier an operator has, never the internal uuid), for whatever
+ * ad-hoc reason (a friend, a partner, support goodwill) — the bulk grant
+ * action above only ever helps someone with no active subscription yet, and
+ * running it wouldn't target a particular person on demand. Same
+ * `free_lifetime_<userId>` marker as the bulk grant (ADR-44), so it's
+ * indistinguishable from — and cancellable the same way as — any other
+ * lifetime grant. Idempotent: re-running on an already-active account is a
+ * no-op, reported honestly rather than silently "succeeding" a second time.
+ */
+billingRoute.post('/v1/admin/grant-lifetime-subscription', async (c) => {
+  const rateLimited = await checkAdminRateLimit(c);
+  if (rateLimited) return rateLimited;
+  if (!hasValidAdminSecret(c)) return c.json({ error: 'Unauthorized' }, 401);
+
+  const parsed = await parseJsonBody(c, grantSingleSchema);
+  if (!parsed.ok) return parsed.response;
+
+  const db = getSupabase(c.env);
+  const user = await getUserByEmail(db, parsed.data.email);
+  if (!user) return c.json({ error: 'No account found with that email' }, 404);
+
+  if (await hasActiveSubscription(db, user.id)) {
+    return c.json({ granted: false, reason: 'Account already has an active subscription', email: user.email });
+  }
+  await grantLifetimeSubscription(db, user.id);
+  return c.json({ granted: true, email: user.email });
 });
 
 /**
@@ -164,6 +191,12 @@ async function checkAdminRateLimit(c: Context<{ Bindings: Env; Variables: Variab
   const limit = readRateLimitInt(c.env.RATE_LIMIT_ADMIN_PER_MIN, 5);
   const { allowed, retryAfterSeconds } = await checkRateLimit(c.env, `admin:ip:${ip}`, { limit, windowMs: ONE_MINUTE_MS, backoff: true });
   return allowed ? null : rateLimitedResponse(c, retryAfterSeconds);
+}
+
+/** ADR-48. Factored out of three near-identical inline checks — same shared-secret-header pattern every /v1/admin/* route uses. */
+function hasValidAdminSecret(c: Context<{ Bindings: Env; Variables: Variables }>): boolean {
+  const providedSecret = c.req.header('X-Admin-Secret');
+  return !!providedSecret && providedSecret === c.env.ADMIN_SECRET;
 }
 
 billingRoute.get('/billing/success', (c) => c.html(SUCCESS_HTML));

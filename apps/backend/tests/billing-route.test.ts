@@ -52,4 +52,22 @@ describe('billingRoute auth coverage', () => {
     expect(res.status).toBe(429);
     expect(res.headers.get('Retry-After')).toBe('42');
   });
+
+  it('POST /v1/admin/grant-lifetime-subscription (singular) requires the correct admin secret', async () => {
+    const res = await billingRoute.request(
+      '/v1/admin/grant-lifetime-subscription',
+      { method: 'POST', headers: { 'X-Admin-Secret': 'wrong', 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'a@b.com' }) },
+      { ADMIN_SECRET: 'the-real-secret', RATE_LIMITER_DO: ALWAYS_ALLOW_RATE_LIMITER_DO },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /v1/admin/grant-lifetime-subscription (singular) rejects a malformed email before ever touching the database', async () => {
+    const res = await billingRoute.request(
+      '/v1/admin/grant-lifetime-subscription',
+      { method: 'POST', headers: { 'X-Admin-Secret': 'the-real-secret', 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'not-an-email' }) },
+      { ADMIN_SECRET: 'the-real-secret', RATE_LIMITER_DO: ALWAYS_ALLOW_RATE_LIMITER_DO },
+    );
+    expect(res.status).toBe(400);
+  });
 });
