@@ -10,11 +10,13 @@ compatibility_date = "2024-11-01"
 [vars]
 ENVIRONMENT = "production"
 
-# ADR-36. "test" until a full checkout -> webhook -> access-granted cycle has
-# been verified end-to-end against Dodo's sandbox; switch to "live" only
-# after that. Product IDs aren't sensitive (they're not usable without the
-# secret API key), so they're plain vars, not `wrangler secret put`.
-DODO_MODE = "test"
+# ADR-36/37. Switched to "live" once the original test-mode API key turned
+# out to be invalid (root cause: Dodo support confirmed the key/mode
+# mismatch) and the account's monthly/yearly products were found to exist
+# only under the live account, not test. Product IDs aren't sensitive
+# (they're not usable without the secret API key), so they're plain vars,
+# not `wrangler secret put`.
+DODO_MODE = "live"
 DODO_PRODUCT_ID_MONTHLY = "pdt_0Nj1i0A9trZvH8dU1R6Af"
 DODO_PRODUCT_ID_YEARLY = "pdt_0Nj1iIHOgyWVlMCoML90z"
 
