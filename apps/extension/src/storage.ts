@@ -84,6 +84,54 @@ export async function setSettings(partial: Partial<MailTrackSettings>): Promise<
 }
 
 /**
+ * ADR-41 (multi-account). One Chrome profile can have several Gmail tabs
+ * signed into different Google accounts, but `MailTrackSettings.apiKey`
+ * above is a single global "currently active" identity — unchanged by this
+ * addition, so every existing call site that reads `settings.apiKey` keeps
+ * working exactly as before. This is a lighter-weight layer on top: each
+ * Gmail account you've ever signed into gets remembered here, and
+ * `inboxsdk-app.ts` auto-switches the active identity when a *different,
+ * already-known* Gmail tab loads — full simultaneous per-tab tracking
+ * would need redesigning the background poll loop's single-account
+ * assumption, which is a bigger change deliberately deferred.
+ */
+export interface SavedAccount {
+  /** The Gmail address this credential was captured for — from InboxSDK's User.getEmailAddress(), not user-entered. */
+  gmailEmail: string;
+  apiKey: string;
+  /** The MailTrack account email shown at signup — may differ from gmailEmail if the key was pasted manually. */
+  accountEmail: string | null;
+}
+
+const SAVED_ACCOUNTS_KEY = 'mailtrack:savedAccounts';
+
+export async function getSavedAccounts(): Promise<SavedAccount[]> {
+  const stored = await chrome.storage.local.get(SAVED_ACCOUNTS_KEY);
+  return stored[SAVED_ACCOUNTS_KEY] ?? [];
+}
+
+/** Upserts by gmailEmail — signing in again on the same Gmail account replaces its saved credentials rather than duplicating. */
+export async function upsertSavedAccount(account: SavedAccount): Promise<void> {
+  const accounts = await getSavedAccounts();
+  const filtered = accounts.filter((a) => a.gmailEmail !== account.gmailEmail);
+  await chrome.storage.local.set({ [SAVED_ACCOUNTS_KEY]: [...filtered, account] });
+}
+
+export async function removeSavedAccount(gmailEmail: string): Promise<void> {
+  const accounts = await getSavedAccounts();
+  await chrome.storage.local.set({ [SAVED_ACCOUNTS_KEY]: accounts.filter((a) => a.gmailEmail !== gmailEmail) });
+}
+
+/** Makes a previously-saved account the active identity everywhere (content script, popup, background, dashboard all read the same global settings.apiKey). */
+export async function switchToSavedAccount(gmailEmail: string): Promise<SavedAccount | null> {
+  const accounts = await getSavedAccounts();
+  const account = accounts.find((a) => a.gmailEmail === gmailEmail);
+  if (!account) return null;
+  await setSettings({ apiKey: account.apiKey, accountEmail: account.accountEmail });
+  return account;
+}
+
+/**
  * Maps a Gmail message ID (known only after InboxSDK's `sent` event fires)
  * to the msgId MailTrack's backend assigned at `presending` time. The
  * sent-thread status chip looks up by Gmail message ID, so this bridges the

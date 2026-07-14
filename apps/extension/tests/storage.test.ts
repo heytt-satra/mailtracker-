@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   getMsgIdForGmailMessage,
   getPollCursor,
+  getSavedAccounts,
   getSettings,
   getTrackedThread,
   hasReportedBounce,
@@ -10,8 +11,11 @@ import {
   markReplyReported,
   recordGmailMessageId,
   recordThreadForMessage,
+  removeSavedAccount,
   setPollCursor,
   setSettings,
+  switchToSavedAccount,
+  upsertSavedAccount,
 } from '../src/storage';
 
 function installFakeChromeStorage() {
@@ -63,6 +67,46 @@ describe('storage', () => {
     const afterSecond = await getSettings();
     expect(afterSecond.apiKey).toBe('k1'); // first write preserved
     expect(afterSecond.trackingEnabledByDefault).toBe(false);
+  });
+
+  it('saved accounts: upsert, list, and dedup by gmailEmail', async () => {
+    await upsertSavedAccount({ gmailEmail: 'a@gmail.com', apiKey: 'key-a', accountEmail: 'a@gmail.com' });
+    await upsertSavedAccount({ gmailEmail: 'b@gmail.com', apiKey: 'key-b', accountEmail: 'b@gmail.com' });
+    expect(await getSavedAccounts()).toHaveLength(2);
+
+    // Re-saving the same gmailEmail replaces, doesn't duplicate.
+    await upsertSavedAccount({ gmailEmail: 'a@gmail.com', apiKey: 'key-a-rotated', accountEmail: 'a@gmail.com' });
+    const accounts = await getSavedAccounts();
+    expect(accounts).toHaveLength(2);
+    expect(accounts.find((a) => a.gmailEmail === 'a@gmail.com')?.apiKey).toBe('key-a-rotated');
+  });
+
+  it('switchToSavedAccount makes a saved account the active global identity', async () => {
+    await upsertSavedAccount({ gmailEmail: 'a@gmail.com', apiKey: 'key-a', accountEmail: 'a@gmail.com' });
+    await setSettings({ apiKey: 'some-other-key', accountEmail: 'other@gmail.com' });
+
+    const switched = await switchToSavedAccount('a@gmail.com');
+    expect(switched?.apiKey).toBe('key-a');
+
+    const settings = await getSettings();
+    expect(settings.apiKey).toBe('key-a');
+    expect(settings.accountEmail).toBe('a@gmail.com');
+  });
+
+  it('switchToSavedAccount returns null for an unknown account and does not touch settings', async () => {
+    await setSettings({ apiKey: 'unchanged-key' });
+    const result = await switchToSavedAccount('nope@gmail.com');
+    expect(result).toBeNull();
+    expect((await getSettings()).apiKey).toBe('unchanged-key');
+  });
+
+  it('removeSavedAccount removes only the targeted account', async () => {
+    await upsertSavedAccount({ gmailEmail: 'a@gmail.com', apiKey: 'key-a', accountEmail: null });
+    await upsertSavedAccount({ gmailEmail: 'b@gmail.com', apiKey: 'key-b', accountEmail: null });
+    await removeSavedAccount('a@gmail.com');
+    const accounts = await getSavedAccounts();
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0]?.gmailEmail).toBe('b@gmail.com');
   });
 
   it('records and looks up gmail message id -> msgId mappings', async () => {
