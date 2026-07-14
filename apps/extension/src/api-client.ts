@@ -91,6 +91,21 @@ export function getReports(apiKey: string, period: ReportPeriod): Promise<Report
   return request<ReportsResponse>(`/v1/reports?period=${period}`, apiKey);
 }
 
+/**
+ * ADR-42. Uploads a PDF for "Attach tracked PDF" — deliberately NOT built on
+ * request() above, since that helper always sets a JSON Content-Type for
+ * any body; this needs application/pdf and a raw binary body instead.
+ */
+export async function uploadAttachment(apiKey: string, file: Blob): Promise<{ url: string }> {
+  const response = await fetch(`${MAILTRACK_API_BASE_URL}/v1/attachments`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/pdf' },
+    body: file,
+  });
+  if (!response.ok) throw new MailTrackApiError(`Attachment upload failed with ${response.status}`, response.status);
+  return response.json();
+}
+
 export async function exportMessageCsv(apiKey: string, msgId: string): Promise<string> {
   const response = await fetch(`${MAILTRACK_API_BASE_URL}/v1/messages/${msgId}/export`, {
     headers: { Authorization: `Bearer ${apiKey}` },
