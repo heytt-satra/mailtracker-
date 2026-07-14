@@ -100,8 +100,27 @@
       .top-recipients-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
       .top-recipients-table th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
       .top-recipients-table td { padding: 0.5rem; border-bottom: 1px solid var(--border-soft); font-size: 0.85rem; }
+      .top-recipients-table tbody { display: block; max-height: 320px; overflow-y: auto; }
+      .top-recipients-table thead, .top-recipients-table tbody tr { display: table; width: 100%; table-layout: fixed; }
       .report-empty { color: var(--muted); padding: 2rem 0; text-align: center; display: none; }
       .report-empty.visible { display: block; }
+
+      .report-download-btn { font-size: 0.82rem; padding: 0.45rem 0.9rem; cursor: pointer; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--ink); }
+      .report-download-btn:hover { border-color: var(--brand); color: var(--brand); }
+      .report-download-btn:disabled { opacity: 0.6; cursor: default; }
+      .report-controls-right { display: flex; align-items: center; gap: 0.75rem; }
+
+      .day-heatmap { display: flex; align-items: flex-end; gap: 6px; height: 80px; margin-bottom: 1.75rem; }
+      .day-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+      .day-bar { width: 100%; background: var(--brand); border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.75; }
+      .day-bar:hover { opacity: 1; }
+      .day-bar-label { font-size: 0.68rem; color: var(--muted); margin-top: 0.3rem; }
+
+      .breakdown-bar { display: flex; height: 22px; border-radius: 4px; overflow: hidden; margin-bottom: 0.6rem; border: 1px solid var(--border-soft); }
+      .breakdown-seg { height: 100%; }
+      .breakdown-legend { display: flex; flex-wrap: wrap; gap: 0.9rem; font-size: 0.78rem; color: var(--muted); margin-bottom: 1.75rem; }
+      .breakdown-legend .legend-item { display: flex; align-items: center; gap: 0.35rem; }
+      .breakdown-legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
     </style>
   </head>
   <body>
@@ -171,10 +190,13 @@
 
     <div id="reportsPanel">
       <div class="report-controls">
-        <select id="reportPeriod">
-          <option value="week">Last 7 days</option>
-          <option value="month">Last 30 days</option>
-        </select>
+        <div class="report-controls-right">
+          <select id="reportPeriod">
+            <option value="week">Last 7 days</option>
+            <option value="month">Last 30 days</option>
+          </select>
+          <button id="downloadReportPdf" class="report-download-btn" disabled>Download PDF</button>
+        </div>
         <span id="reportVolumeChange" class="report-volume-change"></span>
       </div>
 
@@ -184,17 +206,30 @@
           <div class="report-card"><div class="value" id="reportTotalSent">0</div><div class="label">Sent</div></div>
           <div class="report-card"><div class="value" id="reportOpenRate">0%</div><div class="label">Open rate</div></div>
           <div class="report-card"><div class="value" id="reportClickRate">0%</div><div class="label">Click-through rate</div></div>
+          <div class="report-card"><div class="value" id="reportReplyRate">0%</div><div class="label">Reply rate</div></div>
+          <div class="report-card"><div class="value" id="reportBounceRate">0%</div><div class="label">Bounce rate</div></div>
           <div class="report-card"><div class="value" id="reportBounces">0</div><div class="label">Bounces</div></div>
+          <div class="report-card"><div class="value" id="reportReplies">0</div><div class="label">Replies</div></div>
+          <div class="report-card"><div class="value" id="reportTotalOpens">0</div><div class="label">Total opens</div></div>
+          <div class="report-card"><div class="value" id="reportTotalClicks">0</div><div class="label">Total clicks</div></div>
           <div class="report-card"><div class="value" id="reportTimeToOpen">—</div><div class="label">Avg. time to open</div></div>
+          <div class="report-card"><div class="value" id="reportMedianTimeToOpen">—</div><div class="label">Median time to open</div></div>
           <div class="report-card"><div class="value" id="reportNotVerifiable">0</div><div class="label">Not verifiable</div></div>
         </div>
+
+        <p class="report-section-title">Read confidence breakdown</p>
+        <div class="breakdown-bar" id="breakdownBar"></div>
+        <div class="breakdown-legend" id="breakdownLegend"></div>
 
         <p class="report-section-title">Sends by hour (UTC)</p>
         <div class="hour-heatmap" id="hourHeatmap"></div>
 
-        <p class="report-section-title">Top recipients</p>
+        <p class="report-section-title">Sends by day of week (UTC)</p>
+        <div class="day-heatmap" id="dayHeatmap"></div>
+
+        <p class="report-section-title">Recipients (up to 20, ranked by opens)</p>
         <table class="top-recipients-table" id="topRecipientsTable">
-          <thead><tr><th>Recipient</th><th>Sent</th><th>Opened</th></tr></thead>
+          <thead><tr><th>Recipient</th><th>Sent</th><th>Opened</th><th>Open rate</th></tr></thead>
           <tbody id="topRecipientsBody"></tbody>
         </table>
         <p class="report-empty" id="reportEmpty">No tracked emails in this period yet.</p>

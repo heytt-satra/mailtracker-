@@ -4,7 +4,8 @@ import { getFollowUpSuggestion, type FollowUpThresholds } from '../../src/follow
 import { getSettings } from '../../src/storage';
 import { describeStatus } from '../../src/status-chip';
 import { describeReadConfidence } from '../../src/read-confidence-chip';
-import type { MessageSummary, ReportPeriod } from '@mailtrack/shared';
+import { buildReportPdf, reportPdfFilename } from '../../src/report-pdf';
+import type { MessageSummary, ReportPeriod, ReportsResponse } from '@mailtrack/shared';
 
 const signedOutNotice = document.getElementById('signedOutNotice') as HTMLParagraphElement;
 const loadingEl = document.getElementById('loading') as HTMLParagraphElement;
@@ -32,12 +33,28 @@ const reportBodyEl = document.getElementById('reportBody') as HTMLDivElement;
 const reportTotalSentEl = document.getElementById('reportTotalSent') as HTMLDivElement;
 const reportOpenRateEl = document.getElementById('reportOpenRate') as HTMLDivElement;
 const reportClickRateEl = document.getElementById('reportClickRate') as HTMLDivElement;
+const reportReplyRateEl = document.getElementById('reportReplyRate') as HTMLDivElement;
+const reportBounceRateEl = document.getElementById('reportBounceRate') as HTMLDivElement;
 const reportBouncesEl = document.getElementById('reportBounces') as HTMLDivElement;
+const reportRepliesEl = document.getElementById('reportReplies') as HTMLDivElement;
+const reportTotalOpensEl = document.getElementById('reportTotalOpens') as HTMLDivElement;
+const reportTotalClicksEl = document.getElementById('reportTotalClicks') as HTMLDivElement;
 const reportTimeToOpenEl = document.getElementById('reportTimeToOpen') as HTMLDivElement;
+const reportMedianTimeToOpenEl = document.getElementById('reportMedianTimeToOpen') as HTMLDivElement;
 const reportNotVerifiableEl = document.getElementById('reportNotVerifiable') as HTMLDivElement;
 const hourHeatmapEl = document.getElementById('hourHeatmap') as HTMLDivElement;
+const dayHeatmapEl = document.getElementById('dayHeatmap') as HTMLDivElement;
+const breakdownBarEl = document.getElementById('breakdownBar') as HTMLDivElement;
+const breakdownLegendEl = document.getElementById('breakdownLegend') as HTMLDivElement;
 const topRecipientsBody = document.getElementById('topRecipientsBody') as HTMLTableSectionElement;
 const reportEmptyEl = document.getElementById('reportEmpty') as HTMLParagraphElement;
+const downloadReportPdfButton = document.getElementById('downloadReportPdf') as HTMLButtonElement;
+
+const DAY_LABELS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/** Fixed, honesty-consistent colors — 'read'/'likely_read' are the two shades of verified engagement, the rest are explicitly not a read. */
+const READ_CONFIDENCE_COLORS = { read: '#1a7f37', likelyRead: '#4c9a5f', glanced: '#c9a227', notVerifiable: '#9aa0a6', pending: '#d0d5db' } as const;
+
+let lastReport: ReportsResponse | null = null;
 
 const COLUMN_COUNT = 6;
 const POLL_INTERVAL_MS = 5000;
@@ -114,16 +131,24 @@ async function loadReport(): Promise<void> {
   reportLoadingEl.style.display = '';
   reportLoadingEl.textContent = 'Loading report…';
   reportBodyEl.style.display = 'none';
+  downloadReportPdfButton.disabled = true;
 
   const period = reportPeriodSelect.value as ReportPeriod;
   const report = await getReports(apiKey, period);
+  lastReport = report;
   const { current, volumeChangePercent } = report;
 
   reportTotalSentEl.textContent = String(current.totalSent);
   reportOpenRateEl.textContent = `${Math.round(current.openRate * 100)}%`;
   reportClickRateEl.textContent = `${Math.round(current.clickThroughRate * 100)}%`;
+  reportReplyRateEl.textContent = `${Math.round(current.replyRate * 100)}%`;
+  reportBounceRateEl.textContent = `${Math.round(current.bounceRate * 100)}%`;
   reportBouncesEl.textContent = String(current.bounceCount);
+  reportRepliesEl.textContent = String(current.repliedCount);
+  reportTotalOpensEl.textContent = String(current.totalOpens);
+  reportTotalClicksEl.textContent = String(current.totalClicks);
   reportTimeToOpenEl.textContent = current.avgTimeToOpenMinutes !== null ? formatMinutes(current.avgTimeToOpenMinutes) : '—';
+  reportMedianTimeToOpenEl.textContent = current.medianTimeToOpenMinutes !== null ? formatMinutes(current.medianTimeToOpenMinutes) : '—';
   reportNotVerifiableEl.textContent = String(current.notVerifiableCount);
 
   if (volumeChangePercent === null) {
@@ -135,6 +160,8 @@ async function loadReport(): Promise<void> {
     reportVolumeChangeEl.className = `report-volume-change ${volumeChangePercent >= 0 ? 'up' : 'down'}`;
   }
 
+  renderReadConfidenceBreakdown(current.readConfidenceBreakdown, current.totalSent);
+
   hourHeatmapEl.innerHTML = '';
   const maxHourCount = Math.max(1, ...current.sendsByHourUtc);
   for (const count of current.sendsByHourUtc) {
@@ -145,17 +172,78 @@ async function loadReport(): Promise<void> {
     hourHeatmapEl.appendChild(bar);
   }
 
+  dayHeatmapEl.innerHTML = '';
+  const maxDayCount = Math.max(1, ...current.sendsByDayOfWeekUtc);
+  current.sendsByDayOfWeekUtc.forEach((count, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'day-bar-wrap';
+    const bar = document.createElement('div');
+    bar.className = 'day-bar';
+    bar.style.height = `${Math.max(2, (count / maxDayCount) * 60)}px`;
+    bar.title = `${count} sent`;
+    const label = document.createElement('div');
+    label.className = 'day-bar-label';
+    label.textContent = DAY_LABELS_SHORT[i]!;
+    wrap.appendChild(bar);
+    wrap.appendChild(label);
+    dayHeatmapEl.appendChild(wrap);
+  });
+
   topRecipientsBody.innerHTML = '';
   for (const r of current.topRecipients) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td>${escapeHtml(r.recipient)}</td><td>${r.sentCount}</td><td>${r.openedCount}</td>`;
+    row.innerHTML = `<td>${escapeHtml(r.recipient)}</td><td>${r.sentCount}</td><td>${r.openedCount}</td><td>${Math.round(r.openRate * 100)}%</td>`;
     topRecipientsBody.appendChild(row);
   }
 
   reportEmptyEl.classList.toggle('visible', current.totalSent === 0);
   reportLoadingEl.style.display = 'none';
   reportBodyEl.style.display = '';
+  downloadReportPdfButton.disabled = current.totalSent === 0;
 }
+
+function renderReadConfidenceBreakdown(breakdown: ReportsResponse['current']['readConfidenceBreakdown'], totalSent: number): void {
+  breakdownBarEl.innerHTML = '';
+  breakdownLegendEl.innerHTML = '';
+
+  const segments: [keyof typeof READ_CONFIDENCE_COLORS, string, number][] = [
+    ['read', 'Read', breakdown.read],
+    ['likelyRead', 'Likely read', breakdown.likelyRead],
+    ['glanced', 'Glanced', breakdown.glanced],
+    ['notVerifiable', 'Not verifiable', breakdown.notVerifiable],
+    ['pending', 'Pending', breakdown.pending],
+  ];
+
+  for (const [key, label, count] of segments) {
+    if (count === 0) continue;
+    const share = totalSent > 0 ? count / totalSent : 0;
+    const seg = document.createElement('div');
+    seg.className = 'breakdown-seg';
+    seg.style.width = `${share * 100}%`;
+    seg.style.background = READ_CONFIDENCE_COLORS[key];
+    seg.title = `${label}: ${count} (${Math.round(share * 100)}%)`;
+    breakdownBarEl.appendChild(seg);
+
+    const legendItem = document.createElement('span');
+    legendItem.className = 'legend-item';
+    legendItem.innerHTML = `<span class="dot" style="background:${READ_CONFIDENCE_COLORS[key]}"></span>${escapeHtml(label)}: ${count}`;
+    breakdownLegendEl.appendChild(legendItem);
+  }
+
+  if (totalSent === 0) {
+    const seg = document.createElement('div');
+    seg.className = 'breakdown-seg';
+    seg.style.width = '100%';
+    seg.style.background = READ_CONFIDENCE_COLORS.pending;
+    breakdownBarEl.appendChild(seg);
+  }
+}
+
+downloadReportPdfButton.addEventListener('click', () => {
+  if (!lastReport) return;
+  const doc = buildReportPdf(lastReport, new Date().toISOString());
+  doc.save(reportPdfFilename(lastReport.period, lastReport.rangeEnd));
+});
 
 function startPolling(): void {
   stopPolling();
