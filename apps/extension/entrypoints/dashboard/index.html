@@ -97,11 +97,11 @@
       .hour-bar { flex: 1; background: var(--brand); border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.75; }
       .hour-bar:hover { opacity: 1; }
 
-      .top-recipients-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+      .top-recipients-scroll { max-height: 320px; overflow-y: auto; margin-bottom: 1rem; }
+      .top-recipients-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
       .top-recipients-table th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
       .top-recipients-table td { padding: 0.5rem; border-bottom: 1px solid var(--border-soft); font-size: 0.85rem; }
-      .top-recipients-table tbody { display: block; max-height: 320px; overflow-y: auto; }
-      .top-recipients-table thead, .top-recipients-table tbody tr { display: table; width: 100%; table-layout: fixed; }
+      .top-recipients-table th:first-child, .top-recipients-table td:first-child { width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .report-empty { color: var(--muted); padding: 2rem 0; text-align: center; display: none; }
       .report-empty.visible { display: block; }
 
@@ -228,10 +228,12 @@
         <div class="day-heatmap" id="dayHeatmap"></div>
 
         <p class="report-section-title">Recipients (up to 20, ranked by opens)</p>
-        <table class="top-recipients-table" id="topRecipientsTable">
-          <thead><tr><th>Recipient</th><th>Sent</th><th>Msgs opened</th><th>Open rate</th><th>Total opens</th><th>Total clicks</th></tr></thead>
-          <tbody id="topRecipientsBody"></tbody>
-        </table>
+        <div class="top-recipients-scroll">
+          <table class="top-recipients-table" id="topRecipientsTable">
+            <thead><tr><th>Recipient</th><th>Sent</th><th>Msgs opened</th><th>Open rate</th><th>Total opens</th><th>Total clicks</th></tr></thead>
+            <tbody id="topRecipientsBody"></tbody>
+          </table>
+        </div>
         <p class="report-empty" id="reportEmpty">No tracked emails in this period yet.</p>
 
         <p class="report-section-title">Messages in this period — click a row for the full event-by-event timeline</p>

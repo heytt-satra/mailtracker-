@@ -193,7 +193,7 @@ async function loadReport(): Promise<void> {
   topRecipientsBody.innerHTML = '';
   for (const r of current.topRecipients) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td>${escapeHtml(r.recipient)}</td><td>${r.sentCount}</td><td>${r.openedCount}</td><td>${Math.round(r.openRate * 100)}%</td><td>${r.totalOpenCount}</td><td>${r.totalClickCount}</td>`;
+    row.innerHTML = `<td title="${escapeHtml(r.recipient)}">${escapeHtml(r.recipient)}</td><td>${r.sentCount}</td><td>${r.openedCount}</td><td>${Math.round(r.openRate * 100)}%</td><td>${r.totalOpenCount}</td><td>${r.totalClickCount}</td>`;
     topRecipientsBody.appendChild(row);
   }
 
