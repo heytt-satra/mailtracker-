@@ -1,6 +1,6 @@
 import * as InboxSDKLoader from '@inboxsdk/core';
 import { COMPOSE_INJECTION_TIMEOUT_MS, INBOXSDK_APP_ID } from './config';
-import { createMessage, getMessageStatus, MailTrackApiError, reportBounce, reportReply } from './api-client';
+import { createMessage, getMessageStatus, MailTrackApiError, reportBounce, reportReply, uploadAttachment } from './api-client';
 import {
   getMsgIdForGmailMessage,
   getSavedAccounts,
@@ -144,7 +144,68 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
       if (!trackedMsgId) return; // tracking wasn't enabled or failed open untracked — nothing to record
       recordSentMessage(event, trackedMsgId, trackedRecipientEmails).catch(() => {});
     });
+
+    registerAttachTrackedPdfButton(composeView);
   });
+}
+
+/** ADR-42. Mirrors the backend's own MAX_ATTACHMENT_BYTES (apps/backend/src/routes/attachments.ts) so an oversized file is rejected client-side before any upload attempt. */
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+/**
+ * ADR-42 (PDF tracking). Adds a "Attach tracked PDF" button to the compose
+ * toolbar. InboxSDK exposes no way to read files the user attaches via
+ * Gmail's own native paperclip button (confirmed: compose-view.d.ts only has
+ * attachFiles/attachInlineFiles, methods to ADD files, not read them), so
+ * this is a dedicated action rather than auto-detection — the same approach
+ * real competitors (e.g. Mailsuite's "Add Document") actually use. Picking
+ * "Attach" uploads the PDF to R2 and inserts a normal tracked link into the
+ * body, reusing the existing /l/:token click-tracking pipeline rather than
+ * any new tracking mechanism (most PDF viewers block the external-resource
+ * loads a beacon-in-PDF approach would depend on).
+ */
+function registerAttachTrackedPdfButton(composeView: ComposeView): void {
+  composeView.addButton({
+    title: 'Attach tracked PDF',
+    iconUrl: statusIconDataUrl('sent'),
+    type: 'MODIFIER',
+    onClick: () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/pdf';
+      input.style.display = 'none';
+      input.addEventListener('change', () => {
+        const file = input.files?.[0];
+        input.remove();
+        if (!file) return;
+        attachTrackedPdf(composeView, file).catch((err) => {
+          console.error('[MailTrack] tracked PDF attach failed:', err);
+        });
+      });
+      document.body.appendChild(input);
+      input.click();
+    },
+  });
+}
+
+async function attachTrackedPdf(composeView: ComposeView, file: File): Promise<void> {
+  if (file.type !== 'application/pdf') {
+    console.warn('[MailTrack] tracked PDF attach skipped: selected file is not a PDF', file.type);
+    return;
+  }
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    console.warn(`[MailTrack] tracked PDF attach skipped: file exceeds the ${MAX_ATTACHMENT_BYTES / (1024 * 1024)}MB limit`);
+    return;
+  }
+
+  const settings = await getSettings();
+  if (!settings.apiKey) {
+    console.warn('[MailTrack] tracked PDF attach skipped: not signed in');
+    return;
+  }
+
+  const { url } = await uploadAttachment(settings.apiKey, file);
+  composeView.insertLinkIntoBodyAtCursor(file.name, url);
 }
 
 /**

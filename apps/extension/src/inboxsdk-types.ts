@@ -41,6 +41,15 @@ export interface Contact {
   emailAddress: string;
 }
 
+/** ADR-42. Confirmed against the installed package's compose-view-driver.d.ts. */
+export interface ComposeButtonDescriptor {
+  title?: string;
+  iconUrl?: string;
+  onClick: (event: { composeView: ComposeView }) => void;
+  hasDropdown?: boolean;
+  type?: 'SEND_ACTION' | 'MODIFIER';
+}
+
 export interface ComposeView {
   getHTMLContent: () => string;
   setBodyHTML: (html: string) => void;
@@ -52,6 +61,10 @@ export interface ComposeView {
   send: (options?: { sendAndArchive?: boolean }) => void;
   /** ADR-38. Reopens the schedule-send date/time menu — called after injection completes, to resume the flow we cancelled in `scheduleSendMenuOpening`. */
   openScheduleSendMenu: () => void;
+  /** ADR-42. Inserts a clickable link at the cursor — used to insert the "Attach tracked PDF" link into the body. */
+  insertLinkIntoBodyAtCursor: (text: string, url: string) => HTMLElement | null | void;
+  /** ADR-42. Adds a custom button to the compose toolbar (the "Attach tracked PDF" action). */
+  addButton: (descriptor: ComposeButtonDescriptor) => unknown;
   on(event: 'presending', handler: (event: PresendingEvent) => void): void;
   on(event: 'scheduleSendMenuOpening', handler: (event: ScheduleSendMenuOpeningEvent) => void): void;
   on(event: 'sent', handler: (event: SentEvent) => void): void;
