@@ -2,6 +2,16 @@ name = "mailtrack-api"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 
+# ADR-47 (monitoring). Cloudflare's built-in Workers Logs — every
+# console.log/console.error already emitted throughout this codebase
+# (classifier sweep results, every caught error, the [unhandled] handler
+# in index.ts) becomes searchable/filterable in the Cloudflare dashboard
+# instead of only visible during a live `wrangler tail` session. Free-tier
+# compatible (sampled retention), zero code changes required — this is
+# purely a capture toggle.
+[observability]
+enabled = true
+
 # Non-secret config. Secrets (SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_ANON_KEY, MAXMIND_LICENSE_KEY,
 # DODO_API_KEY, DODO_WEBHOOK_SECRET) are set via `wrangler secret put <NAME>` and must never be committed here.
 # SUPABASE_ANON_KEY isn't actually sensitive (it's Supabase's public client
@@ -9,6 +19,15 @@ compatibility_date = "2024-11-01"
 # for tooling consistency.
 [vars]
 ENVIRONMENT = "production"
+
+# ADR-47. Fixed permanently via a committed public key in the extension's
+# wxt.config.ts (apps/extension/wxt.config.ts) — same origin whether the
+# extension is loaded unpacked, sideloaded, or eventually published to the
+# Chrome Web Store with that same key. Previously unset (permissive '*')
+# because the id would otherwise only stabilize once first uploaded to the
+# Store. Locks down CORS on every /v1/* route (see index.ts) to only this
+# extension's origin.
+ALLOWED_EXTENSION_ORIGIN = "chrome-extension://kjgiejkgmfcnndldnlbmggabddhgdlee"
 
 # ADR-36/37. Switched to "live" once the original test-mode API key turned
 # out to be invalid (root cause: Dodo support confirmed the key/mode

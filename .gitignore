@@ -10,3 +10,7 @@ coverage/
 .output/
 .wxt/
 apps/extension/public/pageWorld.js
+# Private key for the extension's fixed Chrome ID (see PLAN.md ADR-47) — the
+# public half is embedded in wxt.config.ts (safe, that's the whole point of
+# a public key); this private half must never be committed.
+.secrets/
