@@ -3,12 +3,15 @@ import { COMPOSE_INJECTION_TIMEOUT_MS, INBOXSDK_APP_ID } from './config';
 import { createMessage, getMessageStatus, MailTrackApiError, reportBounce, reportReply } from './api-client';
 import {
   getMsgIdForGmailMessage,
+  getSavedAccounts,
   getSettings,
   getTrackedThread,
   hasReportedBounce,
   hasReportedReply,
   markBounceReported,
   markReplyReported,
+  switchToSavedAccount,
+  upsertSavedAccount,
 } from './storage';
 import { recordSentMessage } from './sent-recording';
 import { appendDepthBeacons, appendTrackingPixel, extractLinkUrls, rewriteLinks } from './html-injection';
@@ -19,10 +22,47 @@ import type { ComposeView, Contact, InboxSDKInstance, MessageView } from './inbo
 
 export async function startMailTrack(): Promise<void> {
   const sdk = (await InboxSDKLoader.load(2, INBOXSDK_APP_ID)) as unknown as InboxSDKInstance;
+  await syncAccountForThisGmailTab(sdk);
   registerComposeTracking(sdk);
   registerStatusChips(sdk);
   registerBounceDetection(sdk);
   registerReplyDetection(sdk);
+}
+
+/**
+ * ADR-41 (multi-account). Runs once per Gmail tab load. Two safe,
+ * unambiguous cases handled automatically; anything murkier (a manually
+ * pasted key, or a MailTrack account signed up under a different email
+ * than this Gmail tab) is left to the options page's explicit "save this
+ * account" action rather than guessed at here.
+ */
+async function syncAccountForThisGmailTab(sdk: InboxSDKInstance): Promise<void> {
+  let gmailEmail: string;
+  try {
+    gmailEmail = sdk.User.getEmailAddress();
+  } catch (err) {
+    console.warn('[MailTrack] could not detect this tab\'s Gmail account; multi-account sync skipped (tracking itself is unaffected)', err);
+    return;
+  }
+  if (!gmailEmail) return;
+
+  const [settings, saved] = await Promise.all([getSettings(), getSavedAccounts()]);
+  const savedForThisTab = saved.find((a) => a.gmailEmail === gmailEmail);
+
+  if (savedForThisTab && savedForThisTab.apiKey !== settings.apiKey) {
+    // A different, already-known Gmail account is active globally (likely
+    // left that way by a different tab) — this tab has its own known
+    // identity, so switch to it rather than tracking under the wrong account.
+    await switchToSavedAccount(gmailEmail);
+    console.info('[MailTrack] switched active account to match this Gmail tab:', gmailEmail);
+    return;
+  }
+
+  if (!savedForThisTab && settings.apiKey && settings.accountEmail === gmailEmail) {
+    // First time seeing this Gmail tab, and the signed-in MailTrack account
+    // was created with the exact same email — safe to remember automatically.
+    await upsertSavedAccount({ gmailEmail, apiKey: settings.apiKey, accountEmail: settings.accountEmail });
+  }
 }
 
 function registerComposeTracking(sdk: InboxSDKInstance): void {
