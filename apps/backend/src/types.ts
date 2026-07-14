@@ -31,6 +31,8 @@ export interface Env {
   DODO_PRODUCT_ID_YEARLY: string;
   /** ADR-42. Hosts uploaded PDFs for "Attach tracked PDF" — the link itself is tracked via the existing /l/:token click pipeline, not this bucket. */
   ATTACHMENTS_BUCKET: R2Bucket;
+  /** ADR-44. Gates POST /v1/admin/grant-lifetime-subscriptions — a one-off internal action, not part of the public API surface, so it's a shared-secret header rather than a per-user API key. Set via `wrangler secret put ADMIN_SECRET`. */
+  ADMIN_SECRET: string;
 }
 
 export interface Variables {

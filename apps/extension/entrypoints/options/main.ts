@@ -1,4 +1,4 @@
-import { createCheckout, deleteMessage, exportMessageCsv, getBillingStatus, provisionApiKey } from '../../src/api-client';
+import { cancelSubscription, createCheckout, deleteMessage, exportMessageCsv, getBillingStatus, provisionApiKey } from '../../src/api-client';
 import { logInWithEmail, signUpWithEmail } from '../../src/auth';
 import {
   getSavedAccounts,
@@ -35,8 +35,11 @@ const statusEl = document.getElementById('status') as HTMLDivElement;
 const billingCard = document.getElementById('billingCard') as HTMLDivElement;
 const billingBadge = document.getElementById('billingBadge') as HTMLDivElement;
 const billingStatusEl = document.getElementById('billingStatus') as HTMLDivElement;
+const subscribeOptionsEl = document.getElementById('subscribeOptions') as HTMLDivElement;
+const cancelOptionsEl = document.getElementById('cancelOptions') as HTMLDivElement;
 const subscribeMonthlyBtn = document.getElementById('subscribeMonthly') as HTMLButtonElement;
 const subscribeYearlyBtn = document.getElementById('subscribeYearly') as HTMLButtonElement;
+const cancelSubscriptionBtn = document.getElementById('cancelSubscriptionBtn') as HTMLButtonElement;
 
 const accountsCard = document.getElementById('accountsCard') as HTMLDivElement;
 const accountsListEl = document.getElementById('accountsList') as HTMLDivElement;
@@ -74,6 +77,8 @@ async function refreshBillingStatus(apiKey: string): Promise<void> {
     const { active } = await getBillingStatus(apiKey);
     billingBadge.textContent = active ? 'Subscription active' : 'No active subscription';
     billingBadge.className = active ? 'plan-badge active' : 'plan-badge inactive';
+    subscribeOptionsEl.style.display = active ? 'none' : '';
+    cancelOptionsEl.style.display = active ? '' : 'none';
   } catch {
     billingBadge.textContent = 'Could not check subscription status';
     billingBadge.className = 'plan-badge inactive';
@@ -156,6 +161,23 @@ async function startCheckout(plan: 'monthly' | 'yearly'): Promise<void> {
 
 subscribeMonthlyBtn.addEventListener('click', () => startCheckout('monthly'));
 subscribeYearlyBtn.addEventListener('click', () => startCheckout('yearly'));
+
+cancelSubscriptionBtn.addEventListener('click', async () => {
+  if (!confirm('Cancel your MailTrack subscription? You can resubscribe anytime.')) return;
+  const settings = await getSettings();
+  if (!settings.apiKey) return;
+  cancelSubscriptionBtn.disabled = true;
+  billingStatusEl.textContent = 'Cancelling…';
+  try {
+    const { message } = await cancelSubscription(settings.apiKey);
+    billingStatusEl.textContent = message;
+    await refreshBillingStatus(settings.apiKey);
+  } catch {
+    billingStatusEl.textContent = 'Could not cancel your subscription. Try again in a moment.';
+  } finally {
+    cancelSubscriptionBtn.disabled = false;
+  }
+});
 
 function showAuthMessage(message: string, isError: boolean): void {
   authStatusEl.textContent = message;

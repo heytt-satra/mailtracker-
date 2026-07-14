@@ -1,5 +1,6 @@
 import type {
   BillingStatusResponse,
+  CancelSubscriptionResponse,
   CreateCheckoutRequest,
   CreateCheckoutResponse,
   CreateMessageRequest,
@@ -84,6 +85,11 @@ export function createCheckout(apiKey: string, body: CreateCheckoutRequest): Pro
 
 export function getBillingStatus(apiKey: string): Promise<BillingStatusResponse> {
   return request<BillingStatusResponse>('/v1/billing/status', apiKey);
+}
+
+/** ADR-44. Cancels the caller's active subscription — a free-lifetime grant cancels immediately, a real Dodo subscription cancels at the end of the current billing period. The response's `message` says which. */
+export function cancelSubscription(apiKey: string): Promise<CancelSubscriptionResponse> {
+  return request<CancelSubscriptionResponse>('/v1/billing/cancel', apiKey, { method: 'POST' });
 }
 
 /** ADR-39. Weekly/monthly report — every number is a real aggregate over already-tracked data. */

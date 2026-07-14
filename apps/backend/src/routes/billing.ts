@@ -1,9 +1,23 @@
 import { Hono } from 'hono';
-import type { BillingStatusResponse, CreateCheckoutRequest, CreateCheckoutResponse } from '@mailtrack/shared';
+import type { BillingStatusResponse, CancelSubscriptionResponse, CreateCheckoutRequest, CreateCheckoutResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
-import { getSupabase, getUserById, hasActiveSubscription, markSubscriptionStatus, upsertSubscription, type SubscriptionStatus } from '../db/client';
+import {
+  getActiveSubscriptionForUser,
+  getAllUserIds,
+  getSupabase,
+  getUserById,
+  grantLifetimeSubscription,
+  hasActiveSubscription,
+  markSubscriptionStatus,
+  normalizeLegacyPlaceholderSubscriptions,
+  upsertSubscription,
+  type SubscriptionStatus,
+} from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { verifyDodoWebhook } from '../lib/dodo-webhook';
+
+/** ADR-44. Synthetic dodo_subscription_id prefix for free-lifetime grants — never a real Dodo id, so it's the marker for "cancel locally, don't call Dodo's API." */
+const LIFETIME_GRANT_PREFIX = 'free_lifetime_';
 
 export const billingRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -50,6 +64,83 @@ billingRoute.get('/v1/billing/status', apiKeyAuth, async (c) => {
   const db = getSupabase(c.env);
   const response: BillingStatusResponse = { active: await hasActiveSubscription(db, c.get('userId')) };
   return c.json(response);
+});
+
+/**
+ * ADR-44. A free-lifetime grant (`free_lifetime_<userId>`, see
+ * grantLifetimeSubscription) was never created at Dodo, so cancelling one
+ * is purely local — calling Dodo's cancel API with a subscription id it's
+ * never heard of would just 404. A real Dodo subscription is cancelled via
+ * their documented `cancel_at_next_billing_date` flag (PATCH
+ * /subscriptions/{id}, confirmed against Dodo's own API reference), which
+ * schedules cancellation for the end of the current billing period rather
+ * than revoking access the customer already paid for.
+ */
+billingRoute.post('/v1/billing/cancel', apiKeyAuth, async (c) => {
+  const db = getSupabase(c.env);
+  const userId = c.get('userId');
+  const subscription = await getActiveSubscriptionForUser(db, userId);
+  if (!subscription) return c.json({ error: 'No active subscription to cancel' }, 404);
+
+  if (subscription.dodoSubscriptionId.startsWith(LIFETIME_GRANT_PREFIX)) {
+    await markSubscriptionStatus(db, subscription.dodoSubscriptionId, 'cancelled');
+    const response: CancelSubscriptionResponse = { cancelled: true, message: 'Your free access has been cancelled.' };
+    return c.json(response);
+  }
+
+  const dodoResponse = await fetch(`${dodoApiBase(c.env)}/subscriptions/${subscription.dodoSubscriptionId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${c.env.DODO_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cancel_at_next_billing_date: true, cancel_reason: 'cancelled_by_customer' }),
+  });
+  if (!dodoResponse.ok) {
+    console.error('[billing/cancel] Dodo cancellation failed:', dodoResponse.status, await dodoResponse.text().catch(() => ''));
+    return c.json({ error: 'Could not cancel subscription' }, 502);
+  }
+  // Deliberately NOT flipping local status to 'cancelled' here — the
+  // subscription is still active until the billing period actually ends,
+  // and Dodo's own subscription.cancelled webhook (already handled below)
+  // is the source of truth for when that happens, same as every other
+  // subscription state change in this file.
+  const response: CancelSubscriptionResponse = { cancelled: true, message: 'Your subscription will end at the close of the current billing period.' };
+  return c.json(response);
+});
+
+/**
+ * ADR-44. One-time internal action: grants every existing account (as of
+ * whenever this is called) a free, non-expiring subscription so nobody who
+ * was already using MailTrack loses tracking access now that ADR-37
+ * switched billing to live mode. Gated on a shared secret header, not
+ * apiKeyAuth — this isn't a per-user action, it iterates every user.
+ * Idempotent: users who already have an active subscription (paid or a
+ * prior grant) are skipped, not overwritten.
+ */
+billingRoute.post('/v1/admin/grant-lifetime-subscriptions', async (c) => {
+  const providedSecret = c.req.header('X-Admin-Secret');
+  if (!providedSecret || providedSecret !== c.env.ADMIN_SECRET) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const db = getSupabase(c.env);
+  const userIds = await getAllUserIds(db);
+  let granted = 0;
+  for (const userId of userIds) {
+    if (await hasActiveSubscription(db, userId)) continue;
+    await grantLifetimeSubscription(db, userId);
+    granted++;
+  }
+  return c.json({ totalUsers: userIds.length, granted });
+});
+
+/** ADR-44. Same auth pattern as the grant action above — one-time cleanup for accounts given a placeholder subscription before live billing existed. See normalizeLegacyPlaceholderSubscriptions. */
+billingRoute.post('/v1/admin/normalize-legacy-subscriptions', async (c) => {
+  const providedSecret = c.req.header('X-Admin-Secret');
+  if (!providedSecret || providedSecret !== c.env.ADMIN_SECRET) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const db = getSupabase(c.env);
+  const normalized = await normalizeLegacyPlaceholderSubscriptions(db);
+  return c.json({ normalized });
 });
 
 billingRoute.get('/billing/success', (c) => c.html(SUCCESS_HTML));

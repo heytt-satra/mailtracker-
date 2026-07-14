@@ -553,6 +553,63 @@ export async function hasActiveSubscription(db: SupabaseClient, userId: string):
   return data !== null;
 }
 
+/** ADR-44. Backs POST /v1/billing/cancel — needs the dodo_subscription_id to know whether this is a real Dodo subscription (cancel via their API) or a free-lifetime grant (cancel locally only). */
+export async function getActiveSubscriptionForUser(db: SupabaseClient, userId: string): Promise<{ dodoSubscriptionId: string } | null> {
+  const { data, error } = await db.from('subscriptions').select('dodo_subscription_id').eq('user_id', userId).eq('status', 'active').limit(1).maybeSingle();
+  if (error) throw error;
+  return data ? { dodoSubscriptionId: data.dodo_subscription_id } : null;
+}
+
+/** ADR-44. Every user id — feeds the one-time lifetime-grant admin action, not used on any hot path. */
+export async function getAllUserIds(db: SupabaseClient): Promise<string[]> {
+  const { data, error } = await db.from('users').select('id');
+  if (error) throw error;
+  return (data ?? []).map((row) => row.id);
+}
+
+/**
+ * ADR-44. Grants a free, non-expiring active subscription — used to
+ * grandfather in existing accounts once real Dodo billing went live
+ * (ADR-37), so nobody who was already using MailTrack loses tracking
+ * access. `free_lifetime_<userId>` is a synthetic id (Dodo subscription ids
+ * are never in this shape) so getActiveSubscriptionForUser/POST
+ * /v1/billing/cancel can recognize it and skip calling Dodo's API for a
+ * subscription that was never actually created there. Idempotent: calling
+ * this on a user who already has one just re-upserts the same row.
+ */
+export async function grantLifetimeSubscription(db: SupabaseClient, userId: string): Promise<void> {
+  await upsertSubscription(db, { userId, dodoSubscriptionId: `free_lifetime_${userId}`, status: 'active', currentPeriodEnd: null });
+}
+
+/**
+ * ADR-44. Before ADR-37 (live billing), a handful of accounts were given a
+ * hand-inserted `active` row with an arbitrary placeholder
+ * dodo_subscription_id (the ADR-36-era testing stopgap) that was never a
+ * real Dodo subscription — but doesn't start with `free_lifetime_` either,
+ * so POST /v1/billing/cancel would wrongly try to cancel it via Dodo's API
+ * and get a 404/502 for a subscription Dodo never heard of. Relabels any
+ * active row whose id isn't recognizably real (Dodo's own ids are prefixed
+ * `sub_`) or already a lifetime grant, to the `free_lifetime_<userId>`
+ * format — same synthetic-id convention, applied retroactively. Pure
+ * cleanup: doesn't touch status or currentPeriodEnd.
+ */
+export async function normalizeLegacyPlaceholderSubscriptions(db: SupabaseClient): Promise<number> {
+  const { data, error } = await db.from('subscriptions').select('id, user_id, dodo_subscription_id').eq('status', 'active');
+  if (error) throw error;
+
+  let normalized = 0;
+  for (const row of data ?? []) {
+    if (row.dodo_subscription_id.startsWith('sub_') || row.dodo_subscription_id.startsWith('free_lifetime_')) continue;
+    const { error: updateError } = await db
+      .from('subscriptions')
+      .update({ dodo_subscription_id: `free_lifetime_${row.user_id}`, updated_at: new Date().toISOString() })
+      .eq('id', row.id);
+    if (updateError) throw updateError;
+    normalized++;
+  }
+  return normalized;
+}
+
 /** All verified-open timestamps for a message, sorted ascending — feeds isHotConversation/isRevival (engagement-alerts.ts). */
 export async function getVerifiedOpenTimestamps(db: SupabaseClient, messageId: string): Promise<string[]> {
   const { data, error } = await db

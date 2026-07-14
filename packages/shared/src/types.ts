@@ -258,6 +258,12 @@ export interface BillingStatusResponse {
   active: boolean;
 }
 
+/** ADR-44. `message` is shown as-is in the options page — differs depending on whether the cancellation took effect immediately (a free-lifetime grant) or at the end of the current billing period (a real Dodo subscription). */
+export interface CancelSubscriptionResponse {
+  cancelled: boolean;
+  message: string;
+}
+
 /**
  * ADR-39. Weekly/monthly reports — every number here is a real aggregate
  * over already-tracked data (see apps/backend/src/reports.ts), nothing

@@ -135,9 +135,12 @@
       <h2 id="billing-heading">Subscription</h2>
       <p class="card-hint">A subscription is required to track new emails. Already-tracked messages and your dashboard history stay available either way.</p>
       <div id="billingBadge" class="plan-badge inactive">Checking…</div>
-      <div class="plan-options">
+      <div class="plan-options" id="subscribeOptions">
         <button class="mt-btn mt-btn-primary" id="subscribeMonthly">Subscribe — $4.99/mo</button>
         <button class="mt-btn mt-btn-ghost" id="subscribeYearly">Subscribe — $49/yr</button>
+      </div>
+      <div class="plan-options" id="cancelOptions" style="display:none">
+        <button class="mt-btn mt-btn-ghost" id="cancelSubscriptionBtn">Cancel subscription</button>
       </div>
       <div id="billingStatus" role="status" aria-live="polite" class="hint"></div>
     </div>
