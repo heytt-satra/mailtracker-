@@ -1,6 +1,14 @@
 import { createCheckout, deleteMessage, exportMessageCsv, getBillingStatus, provisionApiKey } from '../../src/api-client';
 import { logInWithEmail, signUpWithEmail } from '../../src/auth';
-import { getSettings, setSettings, type MailTrackSettings } from '../../src/storage';
+import {
+  getSavedAccounts,
+  getSettings,
+  removeSavedAccount,
+  setSettings,
+  switchToSavedAccount,
+  upsertSavedAccount,
+  type MailTrackSettings,
+} from '../../src/storage';
 
 // Element ids match the MailTrackSettings key of the same name exactly —
 // keeps this list in sync with storage.ts's per-alert toggles without
@@ -30,13 +38,20 @@ const billingStatusEl = document.getElementById('billingStatus') as HTMLDivEleme
 const subscribeMonthlyBtn = document.getElementById('subscribeMonthly') as HTMLButtonElement;
 const subscribeYearlyBtn = document.getElementById('subscribeYearly') as HTMLButtonElement;
 
+const accountsCard = document.getElementById('accountsCard') as HTMLDivElement;
+const accountsListEl = document.getElementById('accountsList') as HTMLDivElement;
+const saveAccountGmailEmailInput = document.getElementById('saveAccountGmailEmail') as HTMLInputElement;
+const accountsStatusEl = document.getElementById('accountsStatus') as HTMLDivElement;
+
 async function refreshView(): Promise<void> {
   const settings = await getSettings();
   const signedIn = !!settings.apiKey;
   signedOutPanel.classList.toggle('hidden', signedIn);
   signedInPanel.classList.toggle('visible', signedIn);
   billingCard.classList.toggle('visible', signedIn);
+  accountsCard.classList.toggle('visible', signedIn);
   if (signedIn) {
+    await renderAccounts();
     signedInEmailEl.textContent = settings.accountEmail ? `Signed in as ${settings.accountEmail}` : 'API key active';
     trackingEnabledInput.checked = settings.trackingEnabledByDefault;
     notificationsEnabledInput.checked = settings.notificationsEnabled;
@@ -64,6 +79,67 @@ async function refreshBillingStatus(apiKey: string): Promise<void> {
     billingBadge.className = 'plan-badge inactive';
   }
 }
+
+async function renderAccounts(): Promise<void> {
+  const [accounts, settings] = await Promise.all([getSavedAccounts(), getSettings()]);
+  accountsListEl.innerHTML = '';
+  if (accounts.length === 0) {
+    const empty = document.createElement('p');
+    empty.id = 'accountsEmpty';
+    empty.textContent = 'No accounts saved yet.';
+    accountsListEl.appendChild(empty);
+    return;
+  }
+  for (const account of accounts) {
+    const isActive = account.apiKey === settings.apiKey;
+    const row = document.createElement('div');
+    row.className = 'account-row';
+    const label = document.createElement('span');
+    label.className = 'account-email';
+    label.textContent = account.gmailEmail;
+    if (isActive) {
+      const tag = document.createElement('span');
+      tag.className = 'account-active-tag';
+      tag.textContent = 'Active';
+      label.appendChild(tag);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'account-actions';
+    if (!isActive) {
+      const switchBtn = document.createElement('button');
+      switchBtn.className = 'mt-btn mt-btn-ghost';
+      switchBtn.textContent = 'Switch to';
+      switchBtn.addEventListener('click', async () => {
+        await switchToSavedAccount(account.gmailEmail);
+        accountsStatusEl.textContent = `Switched to ${account.gmailEmail}.`;
+        await refreshView();
+      });
+      actions.appendChild(switchBtn);
+    }
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'mt-btn mt-btn-ghost';
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', async () => {
+      await removeSavedAccount(account.gmailEmail);
+      accountsStatusEl.textContent = `Removed ${account.gmailEmail}.`;
+      await renderAccounts();
+    });
+    actions.appendChild(removeBtn);
+    row.append(label, actions);
+    accountsListEl.appendChild(row);
+  }
+}
+
+document.getElementById('saveCurrentAccount')?.addEventListener('click', async () => {
+  const gmailEmail = saveAccountGmailEmailInput.value.trim().toLowerCase();
+  if (!gmailEmail) return;
+  const settings = await getSettings();
+  if (!settings.apiKey) return;
+  await upsertSavedAccount({ gmailEmail, apiKey: settings.apiKey, accountEmail: settings.accountEmail });
+  saveAccountGmailEmailInput.value = '';
+  accountsStatusEl.textContent = `Saved. Opening ${gmailEmail} in Gmail will now switch to this MailTrack identity automatically.`;
+  await renderAccounts();
+});
 
 async function startCheckout(plan: 'monthly' | 'yearly'): Promise<void> {
   const settings = await getSettings();

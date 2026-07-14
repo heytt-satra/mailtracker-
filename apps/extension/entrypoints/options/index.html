@@ -52,6 +52,17 @@
       .plan-badge.inactive { color: var(--red); background: color-mix(in srgb, var(--red) 15%, transparent); }
       .plan-options { display: flex; gap: 0.6rem; }
       .plan-options button { flex: 1; }
+
+      #accountsCard { display: none; }
+      #accountsCard.visible { display: block; }
+      #accountsList { margin-bottom: 0.85rem; }
+      .account-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.55rem 0; border-bottom: 1px solid var(--border-soft); font-size: 0.85rem; }
+      .account-row:last-child { border-bottom: none; }
+      .account-row .account-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .account-row .account-active-tag { font-size: 0.72rem; font-weight: 600; color: var(--green); margin-left: 0.4rem; }
+      .account-row .account-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+      .account-row .account-actions button { font-size: 0.75rem; padding: 0.25rem 0.6rem; }
+      #accountsEmpty { font-size: 0.82rem; color: var(--ink-soft); margin: 0 0 0.85rem; }
     </style>
   </head>
   <body>
@@ -129,6 +140,16 @@
         <button class="mt-btn mt-btn-ghost" id="subscribeYearly">Subscribe — $49/yr</button>
       </div>
       <div id="billingStatus" role="status" aria-live="polite" class="hint"></div>
+    </div>
+
+    <div class="card" id="accountsCard" aria-labelledby="accounts-heading">
+      <h2 id="accounts-heading">Gmail accounts</h2>
+      <p class="card-hint">If you use MailTrack across multiple Gmail addresses in this browser, save each one here — opening a saved account's Gmail tab then automatically switches MailTrack to match it. Signing in with the same email as your Gmail address does this for you automatically; use this only if you signed up with a different email or pasted an API key manually.</p>
+      <div id="accountsList"></div>
+      <label class="field-label" for="saveAccountGmailEmail">Gmail address to remember with the currently signed-in MailTrack identity</label>
+      <input type="email" id="saveAccountGmailEmail" placeholder="you@gmail.com" />
+      <button class="mt-btn mt-btn-ghost" id="saveCurrentAccount">Save</button>
+      <div id="accountsStatus" role="status" aria-live="polite" class="hint"></div>
     </div>
 
     <div class="card" aria-labelledby="export-heading">
