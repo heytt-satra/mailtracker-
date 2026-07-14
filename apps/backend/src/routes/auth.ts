@@ -3,6 +3,7 @@ import type { Env, Variables } from '../types';
 import { getSupabase, getSupabaseAnon, upsertUserApiKey } from '../db/client';
 import { randomToken, sha256Hex } from '../lib/crypto';
 import { checkRateLimit, getClientIp, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
+import { buildResetPasswordHtml } from '../pages/reset-password';
 
 export const authRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -87,4 +88,18 @@ authRoute.get('/auth/confirmed', (c) => {
     <p>You can close this tab.</p>
   </body>
 </html>`);
+});
+
+/**
+ * ADR-49. Landing page for Supabase's password-recovery email link — wired
+ * up via `resetPasswordForEmail`'s `redirectTo` option in the extension's
+ * new `requestPasswordReset()` (src/auth.ts). See pages/reset-password.ts
+ * for why this needs a real interactive page rather than a static message
+ * like /auth/confirmed. Same one-time manual step as that page: this exact
+ * URL must be added to the Supabase project's Authentication → URL
+ * Configuration → Redirect URLs allow-list, or Supabase will reject the
+ * redirect and fall back to its default Site URL.
+ */
+authRoute.get('/auth/reset-password', (c) => {
+  return c.html(buildResetPasswordHtml(c.env.SUPABASE_URL, c.env.SUPABASE_ANON_KEY));
 });

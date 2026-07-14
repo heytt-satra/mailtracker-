@@ -1,5 +1,5 @@
 import { cancelSubscription, createCheckout, deleteMessage, exportMessageCsv, getBillingStatus, provisionApiKey } from '../../src/api-client';
-import { logInWithEmail, signUpWithEmail } from '../../src/auth';
+import { logInWithEmail, requestPasswordReset, signUpWithEmail } from '../../src/auth';
 import {
   getSavedAccounts,
   getSettings,
@@ -22,6 +22,8 @@ const signedInEmailEl = document.getElementById('signedInEmail') as HTMLParagrap
 const emailInput = document.getElementById('email') as HTMLInputElement;
 const passwordInput = document.getElementById('password') as HTMLInputElement;
 const authStatusEl = document.getElementById('authStatus') as HTMLDivElement;
+const togglePasswordBtn = document.getElementById('togglePassword') as HTMLButtonElement;
+const forgotPasswordBtn = document.getElementById('forgotPassword') as HTMLButtonElement;
 
 const apiKeyInput = document.getElementById('apiKey') as HTMLInputElement;
 const trackingEnabledInput = document.getElementById('trackingEnabled') as HTMLInputElement;
@@ -208,6 +210,31 @@ document.getElementById('logIn')?.addEventListener('click', async () => {
 document.getElementById('signUp')?.addEventListener('click', async () => {
   showAuthMessage('Signing up…', false);
   await handleAuthResult(await signUpWithEmail(emailInput.value.trim(), passwordInput.value));
+});
+
+togglePasswordBtn.addEventListener('click', () => {
+  const showing = passwordInput.type === 'text';
+  passwordInput.type = showing ? 'password' : 'text';
+  togglePasswordBtn.textContent = showing ? 'Show' : 'Hide';
+  togglePasswordBtn.setAttribute('aria-pressed', String(!showing));
+  togglePasswordBtn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+});
+
+forgotPasswordBtn.addEventListener('click', async () => {
+  const email = emailInput.value.trim();
+  if (!email) {
+    showAuthMessage('Enter your email above first, then click "Forgot password?"', true);
+    return;
+  }
+  forgotPasswordBtn.disabled = true;
+  showAuthMessage('Sending reset link…', false);
+  await requestPasswordReset(email);
+  forgotPasswordBtn.disabled = false;
+  // Deliberately the SAME message regardless of whether the email actually
+  // has an account — a "forgot password" form that says "no account with
+  // that email" lets anyone enumerate registered addresses. Supabase's own
+  // resetPasswordForEmail behaves the same way for this exact reason.
+  showAuthMessage('If an account exists for that email, a reset link is on its way.', false);
 });
 
 document.getElementById('saveApiKey')?.addEventListener('click', async () => {

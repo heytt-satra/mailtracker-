@@ -38,3 +38,23 @@ export async function logInWithEmail(email: string, password: string): Promise<A
   const { data, error } = await getSupabaseAuthClient().auth.signInWithPassword({ email, password });
   return mapAuthResponse(data, error);
 }
+
+export type PasswordResetRequestResult = { ok: true } | { ok: false; message: string };
+
+/**
+ * ADR-49. Sends Supabase's own password-recovery email — MailTrack never
+ * sees or handles the actual password reset, only asks Supabase to start
+ * it. `redirectTo` points at a new backend page (apps/backend/src/pages/
+ * reset-password.ts) since the extension itself can't be the target of an
+ * email link opened in a normal browser tab. Deliberately returns `{ok:
+ * true}` even when Supabase's response would reveal whether the email
+ * exists — see the call site in options/main.ts for why the UI shows the
+ * same message either way (never confirm/deny account existence via a
+ * public "forgot password" form).
+ */
+export async function requestPasswordReset(email: string): Promise<PasswordResetRequestResult> {
+  const redirectTo = `${MAILTRACK_API_BASE_URL}/auth/reset-password`;
+  const { error } = await getSupabaseAuthClient().auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true };
+}
