@@ -53,6 +53,13 @@ namespace_id = "1003"
   limit = 10
   period = 60
 
+[[ratelimits]]
+name = "ATTACHMENTS_RATE_LIMITER"
+namespace_id = "1004"
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
 # ADR-42 (PDF tracking). Stores uploaded PDFs so an "Attach tracked PDF"
 # link can be inserted into the compose body — the link then goes through
 # the EXISTING /l/:token click-tracking pipeline unchanged (scanner/prefetch

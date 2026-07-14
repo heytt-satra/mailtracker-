@@ -18,6 +18,8 @@ export interface Env {
   MESSAGES_RATE_LIMITER: RateLimit;
   /** Keyed by IP — bounds signup/key-rotation abuse independent of any account. */
   AUTH_RATE_LIMITER: RateLimit;
+  /** ADR-42. Keyed by user — bounds how many PDFs a single account can upload per minute (storage abuse, not just request-rate abuse). */
+  ATTACHMENTS_RATE_LIMITER: RateLimit;
   /** ADR-36. 'test' | 'live' — selects test.dodopayments.com vs live.dodopayments.com. Defaults to 'test' (see routes/billing.ts) so a missing/unset var fails toward the sandbox, never accidentally live. */
   DODO_MODE?: string;
   /** Secret API key from the Dodo dashboard — set via `wrangler secret put DODO_API_KEY`, never committed. */
