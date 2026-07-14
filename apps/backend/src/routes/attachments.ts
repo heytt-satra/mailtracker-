@@ -4,6 +4,7 @@ import { getSupabase, hasActiveSubscription } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { randomToken } from '../lib/crypto';
 import { checkRateLimit, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
+import { isPdfMagicBytes } from '../lib/file-validation';
 
 export const attachmentsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -39,6 +40,14 @@ attachmentsRoute.post('/v1/attachments', apiKeyAuth, async (c) => {
   }
   if (body.byteLength > MAX_ATTACHMENT_BYTES) {
     return c.json({ error: `File exceeds the ${MAX_ATTACHMENT_BYTES / (1024 * 1024)}MB limit` }, 413);
+  }
+  // ADR-46: the Content-Type header above is only ever a client claim — this
+  // checks the actual bytes match the real PDF magic signature, so a
+  // mislabeled non-PDF file (HTML, a script, anything) can't get stored and
+  // later served back under a `Content-Type: application/pdf` header a
+  // reader would trust.
+  if (!isPdfMagicBytes(body)) {
+    return c.json({ error: 'File content is not a valid PDF' }, 400);
   }
 
   const token = randomToken();

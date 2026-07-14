@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { EventsPollResponse, MessageListResponse, MessageStatusResponse, TimelineEvent } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
 import {
@@ -15,6 +16,7 @@ import {
 import { isHotConversation, isRevival } from '../engagement-alerts';
 import { apiKeyAuth } from '../middleware/auth';
 import { buildPollUpdates } from '../poll-updates';
+import { isoTimestamp, parseQuery } from '../lib/validate';
 
 export const eventsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -32,12 +34,24 @@ eventsRoute.use('/v1/messages/*', apiKeyAuth);
 // real deployed request rather than guessing further.
 eventsRoute.use('/v1/events/poll', apiKeyAuth);
 
+/**
+ * ADR-46: `offset` previously silently defaulted to 0 on ANY invalid value
+ * (negative, non-numeric, whatever) — meaning a caller with a typo'd offset
+ * would get page 1 back with no indication anything was wrong. Missing is
+ * still a legitimate default (start from the top); present-but-invalid is
+ * now a 400.
+ */
+export const listMessagesQuerySchema = z.object({ offset: z.coerce.number().int().nonnegative().optional() });
+
 // Dashboard message list (M5). Paginated newest-first; `?offset=N` continues
 // from a prior `nextOffset`.
 eventsRoute.get('/v1/messages', async (c) => {
-  const offset = Number(c.req.query('offset') ?? '0');
+  const parsedQuery = parseQuery(c, listMessagesQuerySchema, { offset: c.req.query('offset') });
+  if (!parsedQuery.ok) return parsedQuery.response;
+  const offset = parsedQuery.data.offset ?? 0;
+
   const db = getSupabase(c.env);
-  const { rows, nextOffset } = await listMessagesForUser(db, c.get('userId'), Number.isFinite(offset) && offset >= 0 ? offset : 0);
+  const { rows, nextOffset } = await listMessagesForUser(db, c.get('userId'), offset);
   const stats = await getVerdictStatsForMessages(db, rows.map((row) => row.id));
   const response: MessageListResponse = {
     messages: rows.map((row) => buildMessageSummary(row, stats.get(row.id))),
@@ -112,11 +126,9 @@ eventsRoute.delete('/v1/messages/:msgId', async (c) => {
 // extension's background worker calls this every few seconds. Upgrading to
 // real push is tracked in PLAN.md Future Improvements.
 eventsRoute.get('/v1/events/poll', async (c) => {
-  const since = c.req.query('since');
-  const sinceDate = since ? new Date(since) : new Date(Date.now() - 60_000);
-  if (Number.isNaN(sinceDate.getTime())) {
-    return c.json({ error: 'since must be an ISO-8601 timestamp' }, 400);
-  }
+  const parsedQuery = parseQuery(c, z.object({ since: isoTimestamp.optional() }), { since: c.req.query('since') });
+  if (!parsedQuery.ok) return parsedQuery.response;
+  const sinceDate = parsedQuery.data.since ? new Date(parsedQuery.data.since) : new Date(Date.now() - 60_000);
 
   const db = getSupabase(c.env);
   const userId = c.get('userId');

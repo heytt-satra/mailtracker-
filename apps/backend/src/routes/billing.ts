@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
-import type { BillingStatusResponse, CancelSubscriptionResponse, CreateCheckoutRequest, CreateCheckoutResponse } from '@mailtrack/shared';
+import { z } from 'zod';
+import type { BillingStatusResponse, CancelSubscriptionResponse, CreateCheckoutResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
 import {
   getActiveSubscriptionForUser,
@@ -16,11 +17,14 @@ import {
 import { apiKeyAuth } from '../middleware/auth';
 import { verifyDodoWebhook } from '../lib/dodo-webhook';
 import { checkRateLimit, getClientIp, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
+import { parseJsonBody } from '../lib/validate';
 
 /** ADR-44. Synthetic dodo_subscription_id prefix for free-lifetime grants — never a real Dodo id, so it's the marker for "cancel locally, don't call Dodo's API." */
 const LIFETIME_GRANT_PREFIX = 'free_lifetime_';
 
 export const billingRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+export const createCheckoutSchema = z.object({ plan: z.enum(['monthly', 'yearly']) }).strict();
 
 /** Defaults to test mode on a missing/unset var — a misconfigured deploy should fail toward the sandbox, never accidentally take live payments. */
 function dodoApiBase(env: Env): string {
@@ -28,10 +32,9 @@ function dodoApiBase(env: Env): string {
 }
 
 billingRoute.post('/v1/billing/checkout', apiKeyAuth, async (c) => {
-  const body = await c.req.json<CreateCheckoutRequest>().catch(() => null);
-  if (!body || (body.plan !== 'monthly' && body.plan !== 'yearly')) {
-    return c.json({ error: 'Body must include plan: "monthly" | "yearly"' }, 400);
-  }
+  const parsed = await parseJsonBody(c, createCheckoutSchema);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
   const productId = body.plan === 'yearly' ? c.env.DODO_PRODUCT_ID_YEARLY : c.env.DODO_PRODUCT_ID_MONTHLY;
 
   const db = getSupabase(c.env);
@@ -193,12 +196,25 @@ billingRoute.post('/v1/webhooks/dodo', async (c) => {
   const valid = await verifyDodoWebhook(rawBody, { id, timestamp, signature }, c.env.DODO_WEBHOOK_SECRET, Math.floor(Date.now() / 1000));
   if (!valid) return c.json({ error: 'Invalid signature' }, 401);
 
-  let event: DodoWebhookEvent;
+  let rawEvent: unknown;
   try {
-    event = JSON.parse(rawBody);
+    rawEvent = JSON.parse(rawBody);
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
+  // ADR-46: the signature only proves this payload came from Dodo, not
+  // that it has the shape we expect — a future field-rename or malformed
+  // payload on their side previously would have thrown deep inside handler
+  // logic with a raw, unhandled error. Deliberately NOT .strict(): this is
+  // a third-party payload we don't control, and Dodo adding new fields
+  // over time must never start rejecting otherwise-valid webhooks — only
+  // the fields this handler actually reads are constrained.
+  const eventParse = dodoWebhookEventSchema.safeParse(rawEvent);
+  if (!eventParse.success) {
+    console.error('[billing/webhook] payload had an unexpected shape:', eventParse.error.issues);
+    return c.json({ error: 'Unexpected webhook payload shape' }, 400);
+  }
+  const event = eventParse.data;
 
   const db = getSupabase(c.env);
   const subscriptionId = event.data.subscription_id;
@@ -219,15 +235,15 @@ billingRoute.post('/v1/webhooks/dodo', async (c) => {
   return c.json({ received: true });
 });
 
-interface DodoWebhookEvent {
-  type: string;
-  data: {
-    payload_type?: string;
-    subscription_id?: string;
-    metadata?: Record<string, unknown>;
-    current_period_end?: string;
-  };
-}
+export const dodoWebhookEventSchema = z.object({
+  type: z.string().min(1),
+  data: z.object({
+    payload_type: z.string().optional(),
+    subscription_id: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    current_period_end: z.string().optional(),
+  }),
+});
 
 // A failed payment isn't necessarily a permanent cancellation (Dodo retries)
 // — mapped to 'past_due' rather than 'cancelled' so a subsequent

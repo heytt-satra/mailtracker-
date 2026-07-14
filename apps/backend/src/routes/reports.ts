@@ -1,18 +1,27 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ReportPeriod, ReportPeriodStats, ReportsResponse } from '@mailtrack/shared';
+import type { ReportPeriodStats, ReportsResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
 import { buildMessageSummary, getMessagesForReport, getSupabase, getVerdictStatsForMessages, type MessageSummaryRow } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { computeReportStats, computeVolumeChangePercent, type ReportMessageInput } from '../reports';
+import { parseQuery } from '../lib/validate';
 
 export const reportsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 
+// ADR-46: `period` previously silently fell back to 'week' for ANY value
+// other than the literal string 'month' — a typo'd query param would just
+// silently return the wrong report instead of erroring.
+export const reportsQuerySchema = z.object({ period: z.enum(['week', 'month']).optional() });
+
 reportsRoute.get('/v1/reports', apiKeyAuth, async (c) => {
-  const period: ReportPeriod = c.req.query('period') === 'month' ? 'month' : 'week';
+  const parsedQuery = parseQuery(c, reportsQuerySchema, { period: c.req.query('period') });
+  if (!parsedQuery.ok) return parsedQuery.response;
+  const period = parsedQuery.data.period ?? 'week';
   const periodMs = period === 'month' ? MONTH_MS : WEEK_MS;
 
   const nowMs = Date.now();

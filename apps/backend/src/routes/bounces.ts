@@ -1,15 +1,32 @@
 import { Hono } from 'hono';
-import type { ReportBounceRequest, ReportBounceResponse } from '@mailtrack/shared';
+import { z } from 'zod';
+import type { ReportBounceResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
 import { getBounceCandidateMessages, getSupabase, markMessageBounced } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { correlateBounce, MAX_BOUNCE_DELAY_MS } from '../bounce-correlation';
 import { checkRateLimit, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
+import { isoTimestamp, parseJsonBody } from '../lib/validate';
 
 export const bouncesRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 const MAX_SUBJECT_EXCERPT_LENGTH = 200;
 const MAX_DIAGNOSTIC_LENGTH = 500;
+
+/**
+ * ADR-46 strict input validation: recipientEmail previously had NO
+ * format check at all (just a length truncation) — now rejected outright
+ * if it isn't a real email address, and rejected (not truncated) if it
+ * exceeds the RFC 5321 practical max of 320 chars.
+ */
+export const reportBounceSchema = z
+  .object({
+    recipientEmail: z.string().trim().email().max(320),
+    bounceReceivedAt: isoTimestamp,
+    subjectExcerpt: z.string().trim().max(MAX_SUBJECT_EXCERPT_LENGTH).optional(),
+    diagnostic: z.string().trim().max(MAX_DIAGNOSTIC_LENGTH).optional(),
+  })
+  .strict();
 
 /**
  * ADR-20: reports a bounce notification the extension detected in the
@@ -24,14 +41,10 @@ bouncesRoute.post('/v1/bounces', apiKeyAuth, async (c) => {
   const { allowed, retryAfterSeconds } = await checkRateLimit(c.env, `writes:${c.get('userId')}`, { limit: writeLimit, windowMs: ONE_MINUTE_MS, backoff: false });
   if (!allowed) return rateLimitedResponse(c, retryAfterSeconds);
 
-  const body = await c.req.json<ReportBounceRequest>().catch(() => null);
-  if (!body || typeof body.recipientEmail !== 'string' || typeof body.bounceReceivedAt !== 'string') {
-    return c.json({ error: 'Body must include recipientEmail and bounceReceivedAt' }, 400);
-  }
+  const parsed = await parseJsonBody(c, reportBounceSchema);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
   const bounceReceivedAt = new Date(body.bounceReceivedAt);
-  if (Number.isNaN(bounceReceivedAt.getTime())) {
-    return c.json({ error: 'bounceReceivedAt must be a valid ISO-8601 timestamp' }, 400);
-  }
 
   const db = getSupabase(c.env);
   const userId = c.get('userId');
@@ -40,13 +53,13 @@ bouncesRoute.post('/v1/bounces', apiKeyAuth, async (c) => {
   const candidates = await getBounceCandidateMessages(db, userId, sinceIso);
 
   const result = correlateBounce(candidates, {
-    recipientEmail: body.recipientEmail.trim().slice(0, 320),
-    subjectExcerpt: typeof body.subjectExcerpt === 'string' ? body.subjectExcerpt.trim().slice(0, MAX_SUBJECT_EXCERPT_LENGTH) || undefined : undefined,
+    recipientEmail: body.recipientEmail,
+    subjectExcerpt: body.subjectExcerpt || undefined,
     bounceReceivedAt: bounceReceivedAt.toISOString(),
   });
 
   if (result.matchedMsgId) {
-    const diagnostic = typeof body.diagnostic === 'string' ? body.diagnostic.trim().slice(0, MAX_DIAGNOSTIC_LENGTH) : null;
+    const diagnostic = body.diagnostic || null;
     const reason = diagnostic ? `${result.reason} Diagnostic: "${diagnostic}"` : result.reason;
     await markMessageBounced(db, result.matchedMsgId, { detectedAt: bounceReceivedAt.toISOString(), reason });
   }

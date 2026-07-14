@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
-import type { CreateMessageRequest, CreateMessageResponse } from '@mailtrack/shared';
+import { z } from 'zod';
+import type { CreateMessageResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
 import { getSupabase, hasActiveSubscription, insertBeaconTokens, insertLinkTokens, insertMessage } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { randomToken } from '../lib/crypto';
 import { checkRateLimit, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
+import { parseJsonBody } from '../lib/validate';
 
 export const messagesRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -29,10 +31,30 @@ const LONG_MESSAGE_BEACON_THRESHOLD_BYTES = 90_000;
 const MAX_LINK_URLS = 50;
 
 // Gmail itself doesn't hard-cap subject length, but nothing needs more than
-// this for a dashboard list row; truncating rather than rejecting keeps a
-// long subject from blocking an otherwise-normal send (NFR2 fail-open spirit).
+// this for a dashboard list row.
 const MAX_SUBJECT_LENGTH = 500;
 const MAX_RECIPIENT_LENGTH = 500;
+
+/**
+ * Strict schema: a body that doesn't match is rejected (400) outright, not
+ * silently truncated or defaulted — the previous version truncated an
+ * overlong subject/recipient to fit rather than rejecting it. `.strict()`
+ * also rejects unexpected extra fields, not just wrong-shaped known ones.
+ * `linkUrls` entries are validated as syntactically well-formed URLs here
+ * (a non-URL string is a malformed request); `isTrackableUrl()` below is a
+ * SEPARATE, deliberate filter for scheme (http/https only) — kept as a
+ * filter rather than a rejection because a single non-http(s) link (e.g. a
+ * `mailto:` in a signature) shouldn't fail the whole send (NFR2 fail-open).
+ */
+export const createMessageSchema = z
+  .object({
+    linkUrls: z.array(z.string().url()).max(MAX_LINK_URLS),
+    gmailMessageId: z.string().max(200).optional(),
+    subject: z.string().trim().max(MAX_SUBJECT_LENGTH).optional(),
+    recipient: z.string().trim().max(MAX_RECIPIENT_LENGTH).optional(),
+    bodyLength: z.number().int().nonnegative().optional(),
+  })
+  .strict();
 
 messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
   const userId = c.get('userId');
@@ -54,16 +76,14 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
     return c.json({ error: 'An active MailTrack subscription is required to track new emails.' }, 402);
   }
 
-  const body = await c.req.json<CreateMessageRequest>().catch(() => null);
-  if (!body || !Array.isArray(body.linkUrls)) {
-    return c.json({ error: 'Body must include linkUrls: string[]' }, 400);
-  }
-  if (body.linkUrls.length > MAX_LINK_URLS) {
-    return c.json({ error: `linkUrls exceeds the maximum of ${MAX_LINK_URLS}` }, 400);
-  }
+  const parsed = await parseJsonBody(c, createMessageSchema);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+
+  // Scheme filter, not a rejection — see createMessageSchema's doc comment.
   const validLinkUrls = body.linkUrls.filter(isTrackableUrl);
-  const subject = typeof body.subject === 'string' ? body.subject.trim().slice(0, MAX_SUBJECT_LENGTH) || undefined : undefined;
-  const recipient = typeof body.recipient === 'string' ? body.recipient.trim().slice(0, MAX_RECIPIENT_LENGTH) || undefined : undefined;
+  const subject = body.subject || undefined; // an all-whitespace subject trims to '' — treat the same as omitted, not an error
+  const recipient = body.recipient || undefined;
 
   const pixelToken = randomToken();
 
