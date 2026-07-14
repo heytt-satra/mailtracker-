@@ -20,6 +20,19 @@ DODO_MODE = "live"
 DODO_PRODUCT_ID_MONTHLY = "pdt_0Nj1i0A9trZvH8dU1R6Af"
 DODO_PRODUCT_ID_YEARLY = "pdt_0Nj1iIHOgyWVlMCoML90z"
 
+# ADR-45. Rate-limit thresholds — plain vars (not secrets) so an operator
+# can retune them without touching route code, just edit + `wrangler
+# deploy`. Read via lib/rate-limit.ts::readRateLimitInt, which falls back to
+# a safe hardcoded default if a var is ever unset/malformed.
+RATE_LIMIT_PUBLIC_PER_MIN = "60"
+RATE_LIMIT_USER_ACTIONS_PER_MIN = "120"
+RATE_LIMIT_WRITES_PER_MIN = "30"
+RATE_LIMIT_ATTACHMENTS_PER_MIN = "10"
+RATE_LIMIT_AUTH_IP_PER_MIN = "10"
+RATE_LIMIT_AUTH_ACCOUNT_PER_MIN = "5"
+RATE_LIMIT_ADMIN_PER_MIN = "5"
+RATE_LIMIT_WEBHOOK_PER_MIN = "60"
+
 # Classifier sweep (reads new raw_events, writes verdicts) runs every minute.
 # ADR-1 in PLAN.md: classification must never run inline on the pixel/click hot path.
 # Cloudflare Queues would be preferable for lower latency but require a paid plan;
@@ -29,38 +42,23 @@ DODO_PRODUCT_ID_YEARLY = "pdt_0Nj1iIHOgyWVlMCoML90z"
 [triggers]
 crons = ["* * * * *", "0 3 * * 1"]
 
-# Cloudflare's native Rate Limiting binding — no external KV namespace to
-# provision, namespace_id is just a locally-unique integer we choose. Used to
-# cap abuse on the public pixel/click endpoints (keyed by requester IP) and
-# on message creation (keyed by user, to bound a leaked API key's blast
-# radius). See security-review notes in PLAN.md section 13.
-[[ratelimits]]
-name = "PUBLIC_RATE_LIMITER"
-namespace_id = "1001"
-  [ratelimits.simple]
-  limit = 60
-  period = 60
+# ADR-45. Replaces the old Cloudflare native Rate Limiting bindings (their
+# limit/period were baked in at deploy time with no way to combine per-IP +
+# per-account checks or exponential backoff — see PLAN.md ADR-45). One
+# Durable Object class, one binding, addressed per rate-limit key at
+# request time (lib/rate-limit.ts::checkRateLimit).
+[[durable_objects.bindings]]
+name = "RATE_LIMITER_DO"
+class_name = "RateLimiterDO"
 
-[[ratelimits]]
-name = "MESSAGES_RATE_LIMITER"
-namespace_id = "1002"
-  [ratelimits.simple]
-  limit = 30
-  period = 60
-
-[[ratelimits]]
-name = "AUTH_RATE_LIMITER"
-namespace_id = "1003"
-  [ratelimits.simple]
-  limit = 10
-  period = 60
-
-[[ratelimits]]
-name = "ATTACHMENTS_RATE_LIMITER"
-namespace_id = "1004"
-  [ratelimits.simple]
-  limit = 10
-  period = 60
+# new_sqlite_classes: the SQLite-backed DO storage class, available on the
+# Workers Free plan (the older KV-backed DO storage required a paid plan) —
+# consistent with this project's standing free-tier-first constraint (see
+# the classifier-sweep cron comment above for the same reasoning applied
+# to Queues).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiterDO"]
 
 # ADR-42 (PDF tracking). Stores uploaded PDFs so an "Attach tracked PDF"
 # link can be inserted into the compose body — the link then goes through

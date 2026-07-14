@@ -4,6 +4,7 @@ import type { Env, Variables } from '../types';
 import { getBounceCandidateMessages, getSupabase, markMessageBounced } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { correlateBounce, MAX_BOUNCE_DELAY_MS } from '../bounce-correlation';
+import { checkRateLimit, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
 
 export const bouncesRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -18,8 +19,10 @@ const MAX_DIAGNOSTIC_LENGTH = 500;
  * here to fail open around, so this can validate strictly.
  */
 bouncesRoute.post('/v1/bounces', apiKeyAuth, async (c) => {
-  const { success } = await c.env.MESSAGES_RATE_LIMITER.limit({ key: c.get('userId') });
-  if (!success) return c.json({ error: 'Rate limit exceeded' }, 429);
+  // ADR-45: same shared "writes" bucket as POST /v1/messages and /v1/replies.
+  const writeLimit = readRateLimitInt(c.env.RATE_LIMIT_WRITES_PER_MIN, 30);
+  const { allowed, retryAfterSeconds } = await checkRateLimit(c.env, `writes:${c.get('userId')}`, { limit: writeLimit, windowMs: ONE_MINUTE_MS, backoff: false });
+  if (!allowed) return rateLimitedResponse(c, retryAfterSeconds);
 
   const body = await c.req.json<ReportBounceRequest>().catch(() => null);
   if (!body || typeof body.recipientEmail !== 'string' || typeof body.bounceReceivedAt !== 'string') {

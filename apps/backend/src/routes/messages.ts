@@ -4,6 +4,7 @@ import type { Env, Variables } from '../types';
 import { getSupabase, hasActiveSubscription, insertBeaconTokens, insertLinkTokens, insertMessage } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { randomToken } from '../lib/crypto';
+import { checkRateLimit, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
 
 export const messagesRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -37,10 +38,13 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
   const userId = c.get('userId');
 
   // Bounds the blast radius of a leaked/compromised API key — 30 tracked
-  // sends/minute is generous for a human composing email, well below what a
-  // spam/abuse script would want to do with a stolen key.
-  const { success } = await c.env.MESSAGES_RATE_LIMITER.limit({ key: userId });
-  if (!success) return c.json({ error: 'Rate limit exceeded' }, 429);
+  // sends/minute (configurable via RATE_LIMIT_WRITES_PER_MIN) is generous
+  // for a human composing email, well below what a spam/abuse script would
+  // want to do with a stolen key. Shared "writes" bucket with bounces.ts/
+  // replies.ts (ADR-45) — same reasoning as before the DO-based rewrite.
+  const writeLimit = readRateLimitInt(c.env.RATE_LIMIT_WRITES_PER_MIN, 30);
+  const { allowed, retryAfterSeconds } = await checkRateLimit(c.env, `writes:${userId}`, { limit: writeLimit, windowMs: ONE_MINUTE_MS, backoff: false });
+  if (!allowed) return rateLimitedResponse(c, retryAfterSeconds);
 
   // ADR-36: subscription gate. Only NEW tracking is blocked — a lapsed
   // subscription never touches already-tracked messages or dashboard

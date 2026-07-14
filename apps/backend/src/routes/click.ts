@@ -4,6 +4,7 @@ import { classifyIpCategory, getLinkToken, getSupabase, insertRawEvent } from '.
 import { classifyAndApplyOne } from '../classifier/classify-and-apply';
 import { getRequestAsn } from '../lib/cf';
 import { sha256Hex } from '../lib/crypto';
+import { checkRateLimit, getClientIp, ONE_MINUTE_MS, readRateLimitInt } from '../lib/rate-limit';
 
 export const clickRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -27,12 +28,13 @@ clickRoute.get('/l/:token', async (c) => {
   // up to a minute later.
   c.executionCtx.waitUntil(
     (async () => {
-      const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
+      const ip = getClientIp(c.req.header('CF-Connecting-IP'));
       // Same soft rate-limit pattern as the pixel: never affects the
       // redirect the human is already following, only whether this fetch
       // gets logged for classification.
-      const { success } = await c.env.PUBLIC_RATE_LIMITER.limit({ key: ip });
-      if (!success) return;
+      const publicLimit = readRateLimitInt(c.env.RATE_LIMIT_PUBLIC_PER_MIN, 60);
+      const { allowed } = await checkRateLimit(c.env, `public:${ip}`, { limit: publicLimit, windowMs: ONE_MINUTE_MS, backoff: false });
+      if (!allowed) return;
 
       const { asn } = getRequestAsn(c.req.raw);
       const ipCategory = await classifyIpCategory(db, ip).catch(() => null);

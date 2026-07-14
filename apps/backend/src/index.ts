@@ -17,6 +17,12 @@ import { getSupabase } from './db/client';
 import { runClassifierSweep } from './classifier/sweep';
 import { refreshAppleRelayRanges } from './classifier/intel-refresh';
 
+// ADR-45. Durable Object classes must be exported from the Worker's main
+// module (referenced by class_name in wrangler.toml's durable_objects
+// binding) — re-exporting here rather than defining the class in this file
+// keeps rate-limiter-do.ts self-contained and independently readable.
+export { RateLimiterDO } from './rate-limiter-do';
+
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT }));

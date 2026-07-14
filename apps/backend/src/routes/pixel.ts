@@ -4,6 +4,7 @@ import { classifyIpCategory, getMessageByPixelToken, getSupabase, insertRawEvent
 import { classifyAndApplyOne } from '../classifier/classify-and-apply';
 import { getRequestAsn } from '../lib/cf';
 import { sha256Hex } from '../lib/crypto';
+import { checkRateLimit, getClientIp, ONE_MINUTE_MS, readRateLimitInt } from '../lib/rate-limit';
 
 export const pixelRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -31,14 +32,15 @@ pixelRoute.get('/p/:token', async (c) => {
 
 async function logPixelFetch(env: Env, pixelToken: string, request: Request): Promise<void> {
   try {
-    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+    const ip = getClientIp(request.headers.get('CF-Connecting-IP'));
     // Rate limit is checked here, in the background task, never on the
     // response path — the pixel itself always returns 200 with the same
     // bytes regardless (no validity leak, ADR from pixel.ts header comment).
     // Exceeding the limit just means this fetch isn't logged; it does not
     // change what the requester sees.
-    const { success } = await env.PUBLIC_RATE_LIMITER.limit({ key: ip });
-    if (!success) return;
+    const publicLimit = readRateLimitInt(env.RATE_LIMIT_PUBLIC_PER_MIN, 60);
+    const { allowed } = await checkRateLimit(env, `public:${ip}`, { limit: publicLimit, windowMs: ONE_MINUTE_MS, backoff: false });
+    if (!allowed) return;
 
     const db = getSupabase(env);
     const message = await getMessageByPixelToken(db, pixelToken);

@@ -3,6 +3,7 @@ import type { ReportReplyRequest, ReportReplyResponse } from '@mailtrack/shared'
 import type { Env, Variables } from '../types';
 import { getMessageById, getSupabase, markMessageReplied } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
+import { checkRateLimit, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
 
 export const repliesRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -15,8 +16,10 @@ export const repliesRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
  * message replied.
  */
 repliesRoute.post('/v1/replies', apiKeyAuth, async (c) => {
-  const { success } = await c.env.MESSAGES_RATE_LIMITER.limit({ key: c.get('userId') });
-  if (!success) return c.json({ error: 'Rate limit exceeded' }, 429);
+  // ADR-45: same shared "writes" bucket as POST /v1/messages and /v1/bounces.
+  const writeLimit = readRateLimitInt(c.env.RATE_LIMIT_WRITES_PER_MIN, 30);
+  const { allowed, retryAfterSeconds } = await checkRateLimit(c.env, `writes:${c.get('userId')}`, { limit: writeLimit, windowMs: ONE_MINUTE_MS, backoff: false });
+  if (!allowed) return rateLimitedResponse(c, retryAfterSeconds);
 
   const body = await c.req.json<ReportReplyRequest>().catch(() => null);
   if (!body || typeof body.msgId !== 'string' || typeof body.detectedAt !== 'string') {

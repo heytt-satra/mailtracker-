@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { BillingStatusResponse, CancelSubscriptionResponse, CreateCheckoutRequest, CreateCheckoutResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
 import {
@@ -15,6 +15,7 @@ import {
 } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { verifyDodoWebhook } from '../lib/dodo-webhook';
+import { checkRateLimit, getClientIp, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
 
 /** ADR-44. Synthetic dodo_subscription_id prefix for free-lifetime grants — never a real Dodo id, so it's the marker for "cancel locally, don't call Dodo's API." */
 const LIFETIME_GRANT_PREFIX = 'free_lifetime_';
@@ -116,6 +117,8 @@ billingRoute.post('/v1/billing/cancel', apiKeyAuth, async (c) => {
  * prior grant) are skipped, not overwritten.
  */
 billingRoute.post('/v1/admin/grant-lifetime-subscriptions', async (c) => {
+  const rateLimited = await checkAdminRateLimit(c);
+  if (rateLimited) return rateLimited;
   const providedSecret = c.req.header('X-Admin-Secret');
   if (!providedSecret || providedSecret !== c.env.ADMIN_SECRET) {
     return c.json({ error: 'Unauthorized' }, 401);
@@ -134,6 +137,8 @@ billingRoute.post('/v1/admin/grant-lifetime-subscriptions', async (c) => {
 
 /** ADR-44. Same auth pattern as the grant action above — one-time cleanup for accounts given a placeholder subscription before live billing existed. See normalizeLegacyPlaceholderSubscriptions. */
 billingRoute.post('/v1/admin/normalize-legacy-subscriptions', async (c) => {
+  const rateLimited = await checkAdminRateLimit(c);
+  if (rateLimited) return rateLimited;
   const providedSecret = c.req.header('X-Admin-Secret');
   if (!providedSecret || providedSecret !== c.env.ADMIN_SECRET) {
     return c.json({ error: 'Unauthorized' }, 401);
@@ -142,6 +147,21 @@ billingRoute.post('/v1/admin/normalize-legacy-subscriptions', async (c) => {
   const normalized = await normalizeLegacyPlaceholderSubscriptions(db);
   return c.json({ normalized });
 });
+
+/**
+ * ADR-45. The admin routes above were previously unrate-limited entirely —
+ * a real gap, since they're gated only by a static secret-header compare
+ * (no per-attempt cost like Supabase token verification), making them a
+ * plausible brute-force target for the secret itself. Strict, per-IP,
+ * backoff-enabled — the same shape as the auth-provisioning checks, since
+ * "guessing a secret repeatedly" is the same threat model either way.
+ */
+async function checkAdminRateLimit(c: Context<{ Bindings: Env; Variables: Variables }>) {
+  const ip = getClientIp(c.req.header('CF-Connecting-IP'));
+  const limit = readRateLimitInt(c.env.RATE_LIMIT_ADMIN_PER_MIN, 5);
+  const { allowed, retryAfterSeconds } = await checkRateLimit(c.env, `admin:ip:${ip}`, { limit, windowMs: ONE_MINUTE_MS, backoff: true });
+  return allowed ? null : rateLimitedResponse(c, retryAfterSeconds);
+}
 
 billingRoute.get('/billing/success', (c) => c.html(SUCCESS_HTML));
 billingRoute.get('/billing/cancel', (c) => c.html(CANCEL_HTML));
@@ -153,6 +173,17 @@ billingRoute.get('/billing/cancel', (c) => c.html(CANCEL_HTML));
  * to the subscriptions table (see db/client.ts upsertSubscription).
  */
 billingRoute.post('/v1/webhooks/dodo', async (c) => {
+  // ADR-45: was completely unrate-limited — signature verification is real
+  // crypto work, so a flood of bogus posts here isn't free even though
+  // they'd all fail verification. Moderate/public-tier, not backoff: Dodo's
+  // own servers are the expected caller and retry on failure, so this
+  // should never punish legitimate webhook delivery the way it would
+  // punish a human repeatedly guessing a password.
+  const ip = getClientIp(c.req.header('CF-Connecting-IP'));
+  const webhookLimit = readRateLimitInt(c.env.RATE_LIMIT_WEBHOOK_PER_MIN, 60);
+  const webhookCheck = await checkRateLimit(c.env, `webhook:ip:${ip}`, { limit: webhookLimit, windowMs: ONE_MINUTE_MS, backoff: false });
+  if (!webhookCheck.allowed) return rateLimitedResponse(c, webhookCheck.retryAfterSeconds);
+
   const rawBody = await c.req.text();
   const id = c.req.header('webhook-id');
   const timestamp = c.req.header('webhook-timestamp');

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { getSupabase, getSupabaseAnon, upsertUserApiKey } from '../db/client';
 import { randomToken, sha256Hex } from '../lib/crypto';
+import { checkRateLimit, getClientIp, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
 
 export const authRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -13,6 +14,19 @@ export const authRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
  * the existing api-key auth middleware — Supabase Auth is only ever used as
  * a one-time identity gate here, not as the ongoing request-auth mechanism,
  * so every other route's tested, hardened auth path is untouched.
+ *
+ * ADR-45: two independent, backoff-enabled checks, not one flat limit.
+ * Per-IP runs FIRST, before the token is ever verified — a bad actor
+ * hammering this endpoint with garbage tokens (or someone else's valid
+ * token, credential-stuffing style) shouldn't get free Supabase verification
+ * calls just because each attempt uses a different account. Per-account
+ * runs AFTER verification succeeds, keyed on the real Supabase user id —
+ * this is what actually matters for "is this specific account being
+ * abused" (e.g. a stolen session token used to spam key rotation), and
+ * can't be checked before we know who the caller is. Both use exponential
+ * backoff (see rate-limit-logic.ts) rather than a flat lockout: a fixed
+ * window is trivially waited out by an attacker on a timer, but each
+ * repeated violation here roughly doubles the wait.
  */
 authRoute.post('/v1/auth/provision', async (c) => {
   const authHeader = c.req.header('Authorization');
@@ -21,14 +35,20 @@ authRoute.post('/v1/auth/provision', async (c) => {
     return c.json({ error: 'Missing Supabase access token' }, 401);
   }
 
-  const { success } = await c.env.AUTH_RATE_LIMITER.limit({ key: c.req.header('CF-Connecting-IP') ?? 'unknown' });
-  if (!success) return c.json({ error: 'Rate limit exceeded' }, 429);
+  const ip = getClientIp(c.req.header('CF-Connecting-IP'));
+  const ipLimit = readRateLimitInt(c.env.RATE_LIMIT_AUTH_IP_PER_MIN, 10);
+  const ipCheck = await checkRateLimit(c.env, `auth:ip:${ip}`, { limit: ipLimit, windowMs: ONE_MINUTE_MS, backoff: true });
+  if (!ipCheck.allowed) return rateLimitedResponse(c, ipCheck.retryAfterSeconds, 'Too many attempts from this network. Try again later.');
 
   const supabaseAnon = getSupabaseAnon(c.env);
   const { data, error } = await supabaseAnon.auth.getUser(supabaseAccessToken);
   if (error || !data.user) {
     return c.json({ error: 'Invalid or expired Supabase session' }, 401);
   }
+
+  const accountLimit = readRateLimitInt(c.env.RATE_LIMIT_AUTH_ACCOUNT_PER_MIN, 5);
+  const accountCheck = await checkRateLimit(c.env, `auth:account:${data.user.id}`, { limit: accountLimit, windowMs: ONE_MINUTE_MS, backoff: true });
+  if (!accountCheck.allowed) return rateLimitedResponse(c, accountCheck.retryAfterSeconds, 'Too many attempts on this account. Try again later.');
 
   const apiKey = randomToken() + randomToken(); // 256 bits total — this key is long-lived, unlike the 128-bit per-message tokens
   const apiKeyHash = await sha256Hex(apiKey);

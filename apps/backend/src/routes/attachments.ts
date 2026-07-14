@@ -3,6 +3,7 @@ import type { Env, Variables } from '../types';
 import { getSupabase, hasActiveSubscription } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { randomToken } from '../lib/crypto';
+import { checkRateLimit, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
 
 export const attachmentsRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -15,8 +16,9 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 attachmentsRoute.post('/v1/attachments', apiKeyAuth, async (c) => {
   const userId = c.get('userId');
-  const { success } = await c.env.ATTACHMENTS_RATE_LIMITER.limit({ key: userId });
-  if (!success) return c.json({ error: 'Rate limit exceeded' }, 429);
+  const attachmentsLimit = readRateLimitInt(c.env.RATE_LIMIT_ATTACHMENTS_PER_MIN, 10);
+  const { allowed, retryAfterSeconds } = await checkRateLimit(c.env, `attachments:${userId}`, { limit: attachmentsLimit, windowMs: ONE_MINUTE_MS, backoff: false });
+  if (!allowed) return rateLimitedResponse(c, retryAfterSeconds);
 
   // ADR-42, same gate as POST /v1/messages (ADR-36) — this costs real
   // storage, not just a request, so it's held to the same subscription

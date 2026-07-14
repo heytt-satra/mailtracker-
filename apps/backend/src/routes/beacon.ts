@@ -4,6 +4,7 @@ import { classifyIpCategory, getMessageByBeaconToken, getSupabase, insertRawEven
 import { classifyAndApplyOne } from '../classifier/classify-and-apply';
 import { getRequestAsn } from '../lib/cf';
 import { sha256Hex } from '../lib/crypto';
+import { checkRateLimit, getClientIp, ONE_MINUTE_MS, readRateLimitInt } from '../lib/rate-limit';
 
 /**
  * Track B depth beacons (ADR-19): mid/bottom tracking images, generated only
@@ -32,9 +33,10 @@ beaconRoute.get('/b/:token', async (c) => {
 
 async function logBeaconFetch(env: Env, beaconToken: string, request: Request): Promise<void> {
   try {
-    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-    const { success } = await env.PUBLIC_RATE_LIMITER.limit({ key: ip });
-    if (!success) return;
+    const ip = getClientIp(request.headers.get('CF-Connecting-IP'));
+    const publicLimit = readRateLimitInt(env.RATE_LIMIT_PUBLIC_PER_MIN, 60);
+    const { allowed } = await checkRateLimit(env, `public:${ip}`, { limit: publicLimit, windowMs: ONE_MINUTE_MS, backoff: false });
+    if (!allowed) return;
 
     const db = getSupabase(env);
     const found = await getMessageByBeaconToken(db, beaconToken);

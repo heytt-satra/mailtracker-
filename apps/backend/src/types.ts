@@ -13,13 +13,29 @@ export interface Env {
    * PLAN.md Known Issues / security checklist.
    */
   ALLOWED_EXTENSION_ORIGIN?: string;
-  /** Cloudflare native Rate Limiting bindings, declared in wrangler.toml — see security notes in PLAN.md section 13. */
-  PUBLIC_RATE_LIMITER: RateLimit;
-  MESSAGES_RATE_LIMITER: RateLimit;
-  /** Keyed by IP — bounds signup/key-rotation abuse independent of any account. */
-  AUTH_RATE_LIMITER: RateLimit;
-  /** ADR-42. Keyed by user — bounds how many PDFs a single account can upload per minute (storage abuse, not just request-rate abuse). */
-  ATTACHMENTS_RATE_LIMITER: RateLimit;
+  /**
+   * ADR-45. Replaces the old Cloudflare native Rate Limiting bindings —
+   * those had their limit/period baked into wrangler.toml at deploy time
+   * with no way to layer per-IP + per-account checks or exponential
+   * backoff. One Durable Object class, addressed per rate-limit key (see
+   * lib/rate-limit.ts::checkRateLimit) — see security notes in PLAN.md.
+   */
+  RATE_LIMITER_DO: DurableObjectNamespace;
+  /**
+   * ADR-45. Every threshold below is a plain wrangler.toml var (not a
+   * secret) read via lib/rate-limit.ts::readRateLimitInt, which falls back
+   * to a safe default if unset/malformed — "configurable, not hardcoded"
+   * means retunable by editing wrangler.toml and redeploying, without
+   * touching route code.
+   */
+  RATE_LIMIT_PUBLIC_PER_MIN?: string;
+  RATE_LIMIT_USER_ACTIONS_PER_MIN?: string;
+  RATE_LIMIT_WRITES_PER_MIN?: string;
+  RATE_LIMIT_ATTACHMENTS_PER_MIN?: string;
+  RATE_LIMIT_AUTH_IP_PER_MIN?: string;
+  RATE_LIMIT_AUTH_ACCOUNT_PER_MIN?: string;
+  RATE_LIMIT_ADMIN_PER_MIN?: string;
+  RATE_LIMIT_WEBHOOK_PER_MIN?: string;
   /** ADR-36. 'test' | 'live' — selects test.dodopayments.com vs live.dodopayments.com. Defaults to 'test' (see routes/billing.ts) so a missing/unset var fails toward the sandbox, never accidentally live. */
   DODO_MODE?: string;
   /** Secret API key from the Dodo dashboard — set via `wrangler secret put DODO_API_KEY`, never committed. */
