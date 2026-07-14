@@ -15,7 +15,7 @@ import { appendDepthBeacons, appendTrackingPixel, extractLinkUrls, rewriteLinks 
 import { formatRecipients } from './recipient-format';
 import { describeStatus, statusIconDataUrl } from './status-chip';
 import { extractBounceDetails, isBounceSender } from './bounce-detection';
-import type { ComposeView, InboxSDKInstance, MessageView } from './inboxsdk-types';
+import type { ComposeView, Contact, InboxSDKInstance, MessageView } from './inboxsdk-types';
 
 export async function startMailTrack(): Promise<void> {
   const sdk = (await InboxSDKLoader.load(2, INBOXSDK_APP_ID)) as unknown as InboxSDKInstance;
@@ -49,12 +49,23 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
       // bug must never be able to loop or silently eat the user's email).
       if (injectionAttempted) return;
       injectionAttempted = true;
-      trackedRecipientEmails = composeView.getToRecipients().map((r) => r.emailAddress);
+      const toRecipients = composeView.getToRecipients();
+      trackedRecipientEmails = toRecipients.map((r) => r.emailAddress);
       event.cancel();
 
-      injectTrackingThenResume(composeView, () => composeView.send()).then((msgId) => {
-        trackedMsgId = msgId;
-      });
+      (async () => {
+        const settings = await getSettings();
+        // ADR-40: mail merge is scoped to plain Send only, not the
+        // schedule-send path — combining "split into N sends" with "each
+        // gets its own schedule time" is a real design question (same time
+        // for all? individually pickable?) left for a later pass rather
+        // than guessed at here.
+        if (settings.individualTrackingForGroupEmails && toRecipients.length > 1) {
+          trackedMsgId = await sendIndividuallyToRecipients(sdk, composeView, toRecipients);
+        } else {
+          trackedMsgId = await injectTrackingThenResume(composeView, () => composeView.send());
+        }
+      })();
     });
 
     // ADR-38: `presending` never fires for Gmail's native "Schedule send" —
@@ -154,6 +165,84 @@ async function injectTrackingThenResume(composeView: ComposeView, resume: () => 
     }
   }
   return msgId;
+}
+
+/** Small stagger between each split send — an unavoidable-by-nature client-side automation risk, but spacing them out looks less like a burst than firing all N back-to-back. */
+const MAIL_MERGE_SEND_STAGGER_MS = 500;
+
+/**
+ * ADR-40 (mail merge). Splits one compose with N recipients into N separate
+ * sends, each with its own tracked pixel/link tokens, so opens/clicks can
+ * be attributed to a specific person instead of "someone in this group."
+ * Built entirely on InboxSDK's own `openNewComposeView()` — confirmed
+ * against the installed package's compose.d.ts — deliberately avoiding a
+ * Gmail-API/OAuth-based approach, which would need a Google Cloud OAuth
+ * consent screen and possibly Google's app-verification review, external
+ * setup this project can't provision on its own (same category of blocker
+ * as the Dodo Payments account issue).
+ *
+ * Returns the last created msgId (matches injectTrackingThenResume's
+ * return shape for the caller), or null if nothing was tracked.
+ */
+async function sendIndividuallyToRecipients(sdk: InboxSDKInstance, firstComposeView: ComposeView, recipients: Contact[]): Promise<string | null> {
+  const settings = await getSettings();
+  if (!settings.trackingEnabledByDefault || !settings.apiKey) {
+    console.warn('[MailTrack] individual tracking skipped: not signed in or tracking disabled — sending as one untracked group email instead of splitting.');
+    try {
+      firstComposeView.send();
+    } catch {
+      // Compose view may have been destroyed between cancel() and here.
+    }
+    return null;
+  }
+
+  const subject = firstComposeView.getSubject();
+  const originalHtml = firstComposeView.getHTMLContent();
+  const linkUrls = extractLinkUrls(originalHtml);
+  let lastMsgId: string | null = null;
+
+  for (let i = 0; i < recipients.length; i++) {
+    const recipient = recipients[i]!;
+    if (i > 0) await new Promise((resolve) => setTimeout(resolve, MAIL_MERGE_SEND_STAGGER_MS));
+
+    try {
+      const result = await createMessage(
+        settings.apiKey,
+        { linkUrls, subject, recipient: formatRecipients([recipient]), bodyLength: originalHtml.length },
+        COMPOSE_INJECTION_TIMEOUT_MS,
+      );
+      let trackedHtml = appendTrackingPixel(rewriteLinks(originalHtml, result.linkMap), result.pixelUrl);
+      if (result.beaconUrls) trackedHtml = appendDepthBeacons(trackedHtml, result.beaconUrls);
+      lastMsgId = result.msgId;
+
+      if (i === 0) {
+        firstComposeView.setToRecipients([recipient.emailAddress]);
+        firstComposeView.setBodyHTML(trackedHtml);
+        firstComposeView.send();
+      } else {
+        const newComposeView = await sdk.Compose.openNewComposeView();
+        newComposeView.setToRecipients([recipient.emailAddress]);
+        newComposeView.setSubject(subject);
+        newComposeView.setBodyHTML(trackedHtml);
+        newComposeView.send();
+      }
+    } catch (err) {
+      // NFR2 fail-open per recipient, not per whole batch — one recipient's
+      // failure (e.g. a timeout) shouldn't silently drop the rest.
+      console.error(`[MailTrack] individual-tracking send failed for recipient ${i + 1}/${recipients.length} (${recipient.emailAddress}):`, err);
+      if (i === 0) {
+        // The original compose view's body/recipients haven't been touched
+        // yet in the failure path — send it untracked rather than lose it.
+        try {
+          firstComposeView.send();
+        } catch {
+          // Already destroyed; nothing more to do.
+        }
+      }
+    }
+  }
+
+  return lastMsgId;
 }
 
 function registerStatusChips(sdk: InboxSDKInstance): void {
