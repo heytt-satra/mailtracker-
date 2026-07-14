@@ -27,6 +27,8 @@ export interface Env {
   /** Product IDs, not secret — safe as plain wrangler.toml vars. */
   DODO_PRODUCT_ID_MONTHLY: string;
   DODO_PRODUCT_ID_YEARLY: string;
+  /** ADR-42. Hosts uploaded PDFs for "Attach tracked PDF" — the link itself is tracked via the existing /l/:token click pipeline, not this bucket. */
+  ATTACHMENTS_BUCKET: R2Bucket;
 }
 
 export interface Variables {

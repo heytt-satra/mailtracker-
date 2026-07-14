@@ -52,3 +52,12 @@ namespace_id = "1003"
   [ratelimits.simple]
   limit = 10
   period = 60
+
+# ADR-42 (PDF tracking). Stores uploaded PDFs so an "Attach tracked PDF"
+# link can be inserted into the compose body — the link then goes through
+# the EXISTING /l/:token click-tracking pipeline unchanged (scanner/prefetch
+# detection, verified_click classification, per-link click detail), so this
+# needed no new tracking mechanism, only somewhere to host the file itself.
+[[r2_buckets]]
+binding = "ATTACHMENTS_BUCKET"
+bucket_name = "mailtrack-attachments"
