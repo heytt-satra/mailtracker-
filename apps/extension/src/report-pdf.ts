@@ -46,7 +46,8 @@ export function buildReportPdf(report: ReportsResponse, generatedAtIso: string):
   y = drawSummarySection(doc, report, marginX, y);
   y = drawReadConfidenceSection(doc, report.current, marginX, y);
   y = drawTimeDistributionSection(doc, report.current, marginX, y);
-  drawRecipientsSection(doc, report.current, marginX, y);
+  y = drawRecipientsSection(doc, report.current, marginX, y);
+  drawMessagesSection(doc, report.current, marginX, y);
 
   addFooters(doc);
   return doc;
@@ -164,7 +165,7 @@ function drawTimeDistributionSection(doc: jsPDF, current: ReportPeriodStats, x: 
   return (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 24;
 }
 
-function drawRecipientsSection(doc: jsPDF, current: ReportPeriodStats, x: number, startY: number): void {
+function drawRecipientsSection(doc: jsPDF, current: ReportPeriodStats, x: number, startY: number): number {
   const y = ensureSpace(doc, startY, 60);
   sectionTitle(doc, `Recipients (${current.topRecipients.length})`, x, y);
 
@@ -172,18 +173,70 @@ function drawRecipientsSection(doc: jsPDF, current: ReportPeriodStats, x: number
     doc.setFontSize(10);
     doc.setTextColor(90);
     doc.text('No tracked emails with a recipient in this period.', x, y + 18);
-    return;
+    return y + 32;
   }
 
   autoTable(doc, {
     startY: y + 8,
     margin: { left: x, right: x },
-    head: [['Recipient', 'Sent', 'Opened', 'Open rate']],
-    body: current.topRecipients.map((r) => [r.recipient, String(r.sentCount), String(r.openedCount), pct(r.openRate)]),
+    // "Total opens"/"Total clicks" are the actual engagement DEPTH (sum
+    // across a recipient's messages) — distinct from "Msgs opened", a count
+    // of messages that were opened at all. A message opened 4 times shows
+    // Total opens: 4, Msgs opened: 1.
+    head: [['Recipient', 'Sent', 'Msgs opened', 'Open rate', 'Total opens', 'Total clicks']],
+    body: current.topRecipients.map((r) => [r.recipient, String(r.sentCount), String(r.openedCount), pct(r.openRate), String(r.totalOpenCount), String(r.totalClickCount)]),
     theme: 'striped',
     styles: { fontSize: 9, cellPadding: 3, overflow: 'ellipsize' },
     headStyles: { fillColor: [230, 230, 230], textColor: 20 },
-    columnStyles: { 1: { cellWidth: 65, halign: 'right' }, 2: { cellWidth: 65, halign: 'right' }, 3: { cellWidth: 75, halign: 'right' } },
+    columnStyles: {
+      1: { cellWidth: 45, halign: 'right' },
+      2: { cellWidth: 65, halign: 'right' },
+      3: { cellWidth: 55, halign: 'right' },
+      4: { cellWidth: 60, halign: 'right' },
+      5: { cellWidth: 60, halign: 'right' },
+    },
+  });
+
+  return (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 24;
+}
+
+function drawMessagesSection(doc: jsPDF, current: ReportPeriodStats, x: number, startY: number): void {
+  const y = ensureSpace(doc, startY, 60);
+  sectionTitle(doc, `Messages (${current.messages.length})`, x, y);
+
+  if (current.messages.length === 0) {
+    doc.setFontSize(10);
+    doc.setTextColor(90);
+    doc.text('No tracked emails in this period.', x, y + 18);
+    return;
+  }
+
+  doc.setFontSize(9);
+  doc.setTextColor(90);
+  doc.text('Exact per-event timestamps (each open, click, and reply) are available by expanding a message in the MailTrack dashboard.', x, y + 4, { maxWidth: 515 });
+
+  autoTable(doc, {
+    startY: y + 22,
+    margin: { left: x, right: x },
+    head: [['Sent', 'Recipient', 'Status', 'Opens', 'Clicks', 'Replied']],
+    body: current.messages.map((m) => [
+      new Date(m.sentAt).toLocaleString(),
+      m.recipient ?? '(no recipient)',
+      m.bounce ? 'Bounced' : m.status,
+      String(m.openCount),
+      String(m.clickCount),
+      m.reply ? `Yes (${new Date(m.reply.detectedAt).toLocaleString()})` : 'No',
+    ]),
+    theme: 'striped',
+    styles: { fontSize: 8, cellPadding: 3, overflow: 'ellipsize' },
+    headStyles: { fillColor: [230, 230, 230], textColor: 20 },
+    columnStyles: {
+      0: { cellWidth: 95 },
+      2: { cellWidth: 60 },
+      3: { cellWidth: 40, halign: 'right' },
+      4: { cellWidth: 40, halign: 'right' },
+      5: { cellWidth: 110 },
+    },
   });
 }
 

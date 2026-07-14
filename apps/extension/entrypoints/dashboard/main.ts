@@ -49,6 +49,7 @@ const breakdownLegendEl = document.getElementById('breakdownLegend') as HTMLDivE
 const topRecipientsBody = document.getElementById('topRecipientsBody') as HTMLTableSectionElement;
 const reportEmptyEl = document.getElementById('reportEmpty') as HTMLParagraphElement;
 const downloadReportPdfButton = document.getElementById('downloadReportPdf') as HTMLButtonElement;
+const reportMessageTableBody = document.getElementById('reportMessageTableBody') as HTMLTableSectionElement;
 
 const DAY_LABELS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /** Fixed, honesty-consistent colors — 'read'/'likely_read' are the two shades of verified engagement, the rest are explicitly not a read. */
@@ -192,14 +193,54 @@ async function loadReport(): Promise<void> {
   topRecipientsBody.innerHTML = '';
   for (const r of current.topRecipients) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td>${escapeHtml(r.recipient)}</td><td>${r.sentCount}</td><td>${r.openedCount}</td><td>${Math.round(r.openRate * 100)}%</td>`;
+    row.innerHTML = `<td>${escapeHtml(r.recipient)}</td><td>${r.sentCount}</td><td>${r.openedCount}</td><td>${Math.round(r.openRate * 100)}%</td><td>${r.totalOpenCount}</td><td>${r.totalClickCount}</td>`;
     topRecipientsBody.appendChild(row);
+  }
+
+  reportMessageTableBody.innerHTML = '';
+  for (const m of current.messages) {
+    reportMessageTableBody.appendChild(buildReportMessageRow(m));
   }
 
   reportEmptyEl.classList.toggle('visible', current.totalSent === 0);
   reportLoadingEl.style.display = 'none';
   reportBodyEl.style.display = '';
   downloadReportPdfButton.disabled = current.totalSent === 0;
+}
+
+/**
+ * A message row for the Reports tab's per-period table — same painted
+ * columns as the Messages tab (paintRow), but rebuilt fresh on every
+ * loadReport() call rather than incrementally polled, and its expand
+ * toggle is self-contained (own closure, not the Messages tab's
+ * `expandedRows` map) since the same message could appear in both tables
+ * independently expanded.
+ */
+function buildReportMessageRow(message: MessageSummary): HTMLTableRowElement {
+  const row = document.createElement('tr');
+  row.className = 'message-row';
+  row.append(document.createElement('td'), document.createElement('td'), document.createElement('td'), document.createElement('td'), countCell(0), countCell(0));
+  paintRow(row, message);
+
+  let detailRow: HTMLTableRowElement | null = null;
+  row.addEventListener('click', () => {
+    if (detailRow) {
+      detailRow.style.display = detailRow.style.display === 'none' ? '' : 'none';
+      return;
+    }
+    detailRow = document.createElement('tr');
+    detailRow.className = 'detail-row';
+    const cell = document.createElement('td');
+    cell.colSpan = COLUMN_COUNT;
+    cell.textContent = 'Loading…';
+    detailRow.appendChild(cell);
+    row.after(detailRow);
+    buildMessageDetailElement(message).then((detail) => {
+      cell.textContent = '';
+      cell.appendChild(detail);
+    });
+  });
+  return row;
 }
 
 function renderReadConfidenceBreakdown(breakdown: ReportsResponse['current']['readConfidenceBreakdown'], totalSent: number): void {
@@ -446,20 +487,16 @@ async function pollRefresh(): Promise<void> {
   applyFilter();
 }
 
-async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<void> {
-  const existing = expandedRows.get(msgId);
-  if (existing) {
-    existing.style.display = existing.style.display === 'none' ? '' : 'none';
-    return;
-  }
-  if (!apiKey) return;
-  const message = messagesById.get(msgId);
-  if (!message) return;
-
-  const detailRow = document.createElement('tr');
-  detailRow.className = 'detail-row';
-  const cell = document.createElement('td');
-  cell.colSpan = COLUMN_COUNT;
+/**
+ * Builds the full expandable detail panel for one message — message ID,
+ * open/click stats, bounce/read/follow-up evidence, and the complete
+ * event-by-event timeline (every open, click, and reply with its own
+ * timestamp). Shared between the Messages tab and the Reports tab's
+ * per-period message table so both show IDENTICAL depth, not two
+ * hand-maintained copies that could drift.
+ */
+async function buildMessageDetailElement(message: MessageSummary): Promise<HTMLDivElement> {
+  const container = document.createElement('div');
 
   const meta = document.createElement('div');
   meta.className = 'detail-meta';
@@ -531,7 +568,7 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
   const timelineContainer = document.createElement('div');
   timelineContainer.textContent = 'Loading timeline…';
 
-  cell.append(
+  container.append(
     meta,
     stats,
     ...(bounceEvidenceEl ? [bounceEvidenceEl] : []),
@@ -540,12 +577,13 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
     timelineHeader,
     timelineContainer,
   );
-  detailRow.appendChild(cell);
-  row.after(detailRow);
-  expandedRows.set(msgId, detailRow);
 
+  if (!apiKey) {
+    timelineContainer.textContent = 'Not signed in.';
+    return container;
+  }
   try {
-    const { events } = await getMessageTimeline(apiKey, msgId);
+    const { events } = await getMessageTimeline(apiKey, message.msgId);
     timelineContainer.innerHTML = '';
     if (events.length === 0) {
       timelineContainer.textContent = 'No events yet.';
@@ -553,7 +591,11 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
     for (const event of events) {
       const eventEl = document.createElement('div');
       eventEl.className = event.suppressed ? 'event suppressed' : 'event';
-      const kindLabel = event.kind === 'link_click' ? 'Click' : 'Pixel fetch';
+      // ADR-42: a click on a MailTrack-hosted attachment link is a PDF
+      // open, not an ordinary link click — worth its own label since it's a
+      // different kind of engagement (opening the attached document).
+      const isPdfOpen = event.kind === 'link_click' && event.clickedUrl?.includes('/attachments/');
+      const kindLabel = isPdfOpen ? 'PDF opened' : event.kind === 'link_click' ? 'Click' : 'Pixel fetch';
       // ADR-30: show WHICH link was clicked, not just "a link" — truncated so a long
       // tracking-redirect-laden URL doesn't blow out the row.
       const urlLine = event.clickedUrl ? `<br/><span class="reason clicked-url" title="${escapeHtml(event.clickedUrl)}">→ ${escapeHtml(truncateSubject(event.clickedUrl, 70))}</span>` : '';
@@ -563,6 +605,31 @@ async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<vo
   } catch {
     timelineContainer.textContent = 'Could not load this message’s timeline. Try again later.';
   }
+  return container;
+}
+
+async function toggleDetail(msgId: string, row: HTMLTableRowElement): Promise<void> {
+  const existing = expandedRows.get(msgId);
+  if (existing) {
+    existing.style.display = existing.style.display === 'none' ? '' : 'none';
+    return;
+  }
+  if (!apiKey) return;
+  const message = messagesById.get(msgId);
+  if (!message) return;
+
+  const detailRow = document.createElement('tr');
+  detailRow.className = 'detail-row';
+  const cell = document.createElement('td');
+  cell.colSpan = COLUMN_COUNT;
+  cell.textContent = 'Loading…';
+  detailRow.appendChild(cell);
+  row.after(detailRow);
+  expandedRows.set(msgId, detailRow);
+
+  const detail = await buildMessageDetailElement(message);
+  cell.textContent = '';
+  cell.appendChild(detail);
 }
 
 function escapeHtml(input: string): string {

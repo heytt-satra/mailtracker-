@@ -229,10 +229,18 @@
 
         <p class="report-section-title">Recipients (up to 20, ranked by opens)</p>
         <table class="top-recipients-table" id="topRecipientsTable">
-          <thead><tr><th>Recipient</th><th>Sent</th><th>Opened</th><th>Open rate</th></tr></thead>
+          <thead><tr><th>Recipient</th><th>Sent</th><th>Msgs opened</th><th>Open rate</th><th>Total opens</th><th>Total clicks</th></tr></thead>
           <tbody id="topRecipientsBody"></tbody>
         </table>
         <p class="report-empty" id="reportEmpty">No tracked emails in this period yet.</p>
+
+        <p class="report-section-title">Messages in this period — click a row for the full event-by-event timeline</p>
+        <table id="reportMessageTable">
+          <thead>
+            <tr><th>Status</th><th>Read confidence</th><th>Recipient</th><th>Sent</th><th>Opens</th><th>Clicks</th></tr>
+          </thead>
+          <tbody id="reportMessageTableBody"></tbody>
+        </table>
       </div>
     </div>
 
