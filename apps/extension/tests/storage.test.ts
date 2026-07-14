@@ -50,6 +50,7 @@ describe('storage', () => {
       notifyOnHotConversation: true,
       notifyOnRevival: true,
       notifyOnFollowUp: true,
+      individualTrackingForGroupEmails: false,
     });
   });
 

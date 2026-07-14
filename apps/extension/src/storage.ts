@@ -31,6 +31,15 @@ export interface MailTrackSettings {
   notifyOnHotConversation: boolean;
   notifyOnRevival: boolean;
   notifyOnFollowUp: boolean;
+  /**
+   * ADR-40. Off by default — this is a real behavior change, not a pure
+   * enhancement: composing to N recipients normally sends ONE email
+   * everyone can see everyone else on; enabling this splits it into N
+   * separate personalized sends, so recipients no longer see each other.
+   * Opt-in because that's a meaningful semantic difference the user should
+   * choose deliberately, not something silently turned on.
+   */
+  individualTrackingForGroupEmails: boolean;
 }
 
 const DEFAULT_SETTINGS: MailTrackSettings = {
@@ -48,6 +57,7 @@ const DEFAULT_SETTINGS: MailTrackSettings = {
   notifyOnHotConversation: true,
   notifyOnRevival: true,
   notifyOnFollowUp: true,
+  individualTrackingForGroupEmails: false,
 };
 
 const SETTINGS_KEY = 'mailtrack:settings';
