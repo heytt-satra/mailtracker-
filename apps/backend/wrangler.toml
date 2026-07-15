@@ -20,14 +20,18 @@ enabled = true
 [vars]
 ENVIRONMENT = "production"
 
-# ADR-47. Fixed permanently via a committed public key in the extension's
-# wxt.config.ts (apps/extension/wxt.config.ts) — same origin whether the
-# extension is loaded unpacked, sideloaded, or eventually published to the
-# Chrome Web Store with that same key. Previously unset (permissive '*')
-# because the id would otherwise only stabilize once first uploaded to the
-# Store. Locks down CORS on every /v1/* route (see index.ts) to only this
-# extension's origin.
-ALLOWED_EXTENSION_ORIGIN = "chrome-extension://kjgiejkgmfcnndldnlbmggabddhgdlee"
+# ADR-47/51. Reverted back to permissive ('*', i.e. unset) after the id
+# lockdown broke tracking in production for every already-installed copy
+# of the extension: the running extension's ACTUAL id doesn't change just
+# because a new build embeds a different manifest key — it only updates
+# once Chrome reloads that specific extension, which doesn't happen
+# automatically for already-installed unpacked/sideloaded copies. The
+# preflight from the old id was silently rejected, POST /v1/messages never
+# even reached the server, and — because tracking fails open (NFR2) — the
+# email still sent normally with nothing visibly broken except a missing
+# dashboard entry. Revisit this once the extension is Store-published,
+# where every install genuinely does share the one fixed id.
+# ALLOWED_EXTENSION_ORIGIN = "chrome-extension://kjgiejkgmfcnndldnlbmggabddhgdlee"
 
 # ADR-36/37. Switched to "live" once the original test-mode API key turned
 # out to be invalid (root cause: Dodo support confirmed the key/mode

@@ -10,6 +10,7 @@ import {
   getUserById,
   grantLifetimeSubscription,
   hasActiveSubscription,
+  listMessagesForUser,
   markSubscriptionStatus,
   normalizeLegacyPlaceholderSubscriptions,
   upsertSubscription,
@@ -176,6 +177,42 @@ billingRoute.post('/v1/admin/grant-lifetime-subscription', async (c) => {
   }
   await grantLifetimeSubscription(db, user.id);
   return c.json({ granted: true, email: user.email });
+});
+
+/**
+ * ADR-50. Read-only support/debugging tool: "why isn't tracking working for
+ * this specific account" was previously only answerable by hand-writing a
+ * one-off SQL query — now a single authenticated call. Deliberately doesn't
+ * touch anything, just reports subscription + recent-message state exactly
+ * as the app itself sees it, so a support conversation can be grounded in
+ * the same data the account holder is looking at, not a guess.
+ */
+billingRoute.get('/v1/admin/account-status', async (c) => {
+  const rateLimited = await checkAdminRateLimit(c);
+  if (rateLimited) return rateLimited;
+  if (!hasValidAdminSecret(c)) return c.json({ error: 'Unauthorized' }, 401);
+
+  const email = c.req.query('email');
+  if (!email) return c.json({ error: 'email query param is required' }, 400);
+
+  const db = getSupabase(c.env);
+  const user = await getUserByEmail(db, email);
+  if (!user) return c.json({ error: 'No account found with that email' }, 404);
+
+  const [active, subscription, { rows }] = await Promise.all([
+    hasActiveSubscription(db, user.id),
+    getActiveSubscriptionForUser(db, user.id),
+    listMessagesForUser(db, user.id, 0),
+  ]);
+
+  return c.json({
+    userId: user.id,
+    email: user.email,
+    hasActiveSubscription: active,
+    subscription,
+    recentMessageCount: rows.length,
+    recentMessages: rows.slice(0, 15).map((m) => ({ msgId: m.id, subject: m.subject, recipient: m.recipient, status: m.status, sentAt: m.sent_at })),
+  });
 });
 
 /**
