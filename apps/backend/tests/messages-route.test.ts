@@ -36,9 +36,9 @@ describe('createMessageSchema (ADR-46 strict input validation)', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects a non-URL string in linkUrls instead of silently dropping it', () => {
-    const result = createMessageSchema.safeParse({ linkUrls: ['not a url'] });
-    expect(result.success).toBe(false);
+  it('ADR-52: accepts non-http(s) or malformed hrefs in linkUrls rather than rejecting the whole request — real Gmail bodies routinely contain mailto:/cid:/anchor hrefs the extension sends as-is (extractLinkUrls does zero filtering), and isTrackableUrl() is the correct, separate place to filter those out (a filter, not a rejection, per NFR2)', () => {
+    const result = createMessageSchema.safeParse({ linkUrls: ['mailto:a@b.com', 'cid:image001.png', '#anchor', 'not a url', ''] });
+    expect(result.success).toBe(true);
   });
 
   it('rejects linkUrls exceeding the max count', () => {

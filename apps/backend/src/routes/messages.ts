@@ -36,19 +36,27 @@ const MAX_SUBJECT_LENGTH = 500;
 const MAX_RECIPIENT_LENGTH = 500;
 
 /**
- * Strict schema: a body that doesn't match is rejected (400) outright, not
- * silently truncated or defaulted — the previous version truncated an
- * overlong subject/recipient to fit rather than rejecting it. `.strict()`
- * also rejects unexpected extra fields, not just wrong-shaped known ones.
- * `linkUrls` entries are validated as syntactically well-formed URLs here
- * (a non-URL string is a malformed request); `isTrackableUrl()` below is a
- * SEPARATE, deliberate filter for scheme (http/https only) — kept as a
- * filter rather than a rejection because a single non-http(s) link (e.g. a
- * `mailto:` in a signature) shouldn't fail the whole send (NFR2 fail-open).
+ * ADR-52 incident fix: `linkUrls` entries are the RAW `href` attribute value
+ * of every link in the composed HTML (apps/extension/src/html-injection.ts
+ * ::extractLinkUrls — zero filtering on the extension side), so a real email
+ * routinely contains non-URL or non-http(s) hrefs: `mailto:`, `cid:` inline-
+ * image references, bare `#anchor` fragments, malformed pasted text. An
+ * earlier version of this schema required every entry to pass `z.string()
+ * .url()`, which REJECTED THE ENTIRE REQUEST — not just that one link — the
+ * moment a single such href appeared, which is the common case, not an edge
+ * case. That silently broke tracking in production (confirmed live: zero
+ * messages created for a paying account, 400s visible in the browser
+ * console, nothing in server logs since the request never got that far).
+ * Fixed by only requiring an array of strings here; `isTrackableUrl()`
+ * below is the correct place for the http(s)-only filter — a FILTER, not a
+ * rejection, so one weird link never fails the whole send (NFR2 fail-open).
+ * Every other field still rejects outright on mismatch (`.strict()` too) —
+ * this was never about being lenient everywhere, just about not rejecting
+ * a wholly ordinary email over a scheme its own compose UI generated.
  */
 export const createMessageSchema = z
   .object({
-    linkUrls: z.array(z.string().url()).max(MAX_LINK_URLS),
+    linkUrls: z.array(z.string()).max(MAX_LINK_URLS),
     gmailMessageId: z.string().max(200).optional(),
     subject: z.string().trim().max(MAX_SUBJECT_LENGTH).optional(),
     recipient: z.string().trim().max(MAX_RECIPIENT_LENGTH).optional(),
