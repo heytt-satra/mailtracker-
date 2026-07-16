@@ -62,7 +62,7 @@ export const PRIVACY_POLICY_HTML = `<!doctype html>
   <p>Raw IP addresses used for open verification are hashed after classification and deleted within 30 days. You can delete tracking data for any sent message from the MailTrack dashboard. You can delete your entire account and all associated data by contacting us at the address below.</p>
 
   <h2>Contact</h2>
-  <p>Questions about this policy or your data: <a href="mailto:studio@lensr.in">studio@lensr.in</a></p>
+  <p>Questions about this policy or your data: <a href="mailto:heyttsatra@teraindustries.com">heyttsatra@teraindustries.com</a></p>
 </div>
 </body>
 </html>`;
