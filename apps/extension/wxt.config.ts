@@ -30,10 +30,18 @@ export default defineConfig({
     // *.supabase.co covers Supabase's standard hosted project domain (the
     // options page's signup/login calls Supabase Auth directly, ADR-10). A
     // self-hosted Supabase instance would need its own origin added here.
+    //
+    // ADR-54. localhost:8787 (the local dev backend) is only included
+    // outside production builds — `wxt build`/`wxt zip` set NODE_ENV to
+    // "production" (see registerWxt in wxt's own source), which is exactly
+    // the artifact uploaded to the Chrome Web Store. Shipping a permission
+    // real users have no use for is an unjustifiable ask that only invites
+    // extra reviewer scrutiny on an already Gmail-host-permission-flagged
+    // submission, for zero benefit — `npm run dev` still gets it.
     host_permissions: [
       'https://mail.google.com/*',
       'https://mailtrack-api.heyttsatra17.workers.dev/*',
-      'http://localhost:8787/*',
+      ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:8787/*']),
       'https://*.supabase.co/*',
     ],
     // Real branded icons (ADR-24), rendered from assets/logo.svg via
