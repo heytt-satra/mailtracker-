@@ -8,19 +8,16 @@ export default defineConfig({
   manifest: {
     name: 'MailTrack',
     description: 'Gmail email tracking that reports verified opens, not every pixel fetch.',
-    // ADR-47. Fixes the extension's chrome-extension://<id> permanently,
-    // BEFORE Chrome Web Store publishing — without this, the id is derived
-    // from install path for an unpacked/dev load and only becomes stable
-    // once first uploaded to the Store, meaning the backend's CORS lockdown
-    // (ALLOWED_EXTENSION_ORIGIN, apps/backend/wrangler.toml) couldn't be
-    // set to anything but a wildcard until after publishing. This is the
-    // base64 DER-encoded PUBLIC half of an RSA keypair generated once
-    // (.secrets/extension-key.pem, gitignored, never committed) — safe to
-    // commit; Chrome derives the extension id purely from this public key,
-    // same id whether loaded unpacked, sideloaded, or uploaded to the Store
-    // with this same key. Corresponding id:
-    // kjgiejkgmfcnndldnlbmggabddhgdlee
-    key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkCEVQvIibtSH/rKbcDYaleDl+GsTB1/JOQTBYck+bOmSfVjIfmRe1bZNK6FbltL+kqY+UJulRTuH4bLYsVG5lERoMRg10ljcPbTsBLWAp6ptIF/FDi3sh/Ncj+cToRc3cJxIqoIZg0VBHTg6aSyogkDrMvCzx5uwrZYhMs7XP+ooXTgoClzaaIcOmspKDHVKVjlEmOZsHs0OrwzQpZ/53JKvgDqmuklZktbTQW4sAT21HxLE+7KJOAtEXrrPkMEPkmbWety0tJ2Cn5Qjr2KAX39nUOvtVuMUSPUfI1AeXSgG2AaLBmoSXGvre3SzNOH51V90/G+GfsoFkEPY3aN5twIDAQAB',
+    // ADR-47/53. The fixed manifest `key` from ADR-47 turned out to be
+    // unusable: the Chrome Web Store rejects any upload whose manifest
+    // contains a `key` field ("key field is not allowed in manifest") —
+    // that field only pins the id for local unpacked/sideloaded installs,
+    // not Store uploads. The Store assigns its own id on first publish
+    // (by design, to prevent id squatting), so ADR-47's premise doesn't
+    // hold for this path. The real, permanent id will only be known once
+    // this is actually published — update ALLOWED_EXTENSION_ORIGIN in
+    // apps/backend/wrangler.toml with that real id then, not before.
+    // .secrets/extension-key.pem (never committed) is now unused.
     // 'scripting' is required by @inboxsdk/core, not used directly by our
     // own code: InboxSDK injects a "page world" bridge script into Gmail's
     // actual page context (content scripts run in an isolated world and

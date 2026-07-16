@@ -13,6 +13,7 @@ import { billingRoute } from './routes/billing';
 import { reportsRoute } from './routes/reports';
 import { attachmentsRoute } from './routes/attachments';
 import { LANDING_PAGE_HTML } from './pages/landing';
+import { PRIVACY_POLICY_HTML } from './pages/privacy';
 import { getSupabase } from './db/client';
 import { runClassifierSweep } from './classifier/sweep';
 import { refreshAppleRelayRanges } from './classifier/intel-refresh';
@@ -29,6 +30,10 @@ app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT }));
 
 // Public marketing page — no auth, no CORS concerns (plain browser navigation).
 app.get('/', (c) => c.html(LANDING_PAGE_HTML));
+
+// Required by the Chrome Web Store before the extension can publish (any
+// item that collects user data must link a live privacy policy URL).
+app.get('/privacy', (c) => c.html(PRIVACY_POLICY_HTML));
 
 // Only the authenticated /v1/* API needs CORS at all — /p/*, /b/*, and /l/*
 // are fetched as an <img> src / top-level navigation, neither of which is
