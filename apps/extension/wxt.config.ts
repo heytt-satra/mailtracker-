@@ -53,4 +53,37 @@ export default defineConfig({
     // was right-click > Options > "Open dashboard", a three-step detour.
     action: { default_popup: 'popup.html', default_title: 'MailTrack' },
   },
+  // ADR-55. Chrome Web Store rejected the MV3 submission ("remotely-hosted
+  // code") over a string it found in the bundled dashboard chunk:
+  // https://cdnjs.cloudflare.com/ajax/libs/pdfobject/2.1.1/pdfobject.min.js
+  // That URL is jsPDF's OWN internal `output('pdfobjectnewwindow', ...)`
+  // branch (node_modules/jspdf/dist/jspdf.es.min.js) — a feature that, if
+  // invoked, dynamically injects a <script src="..."> tag to lazy-load the
+  // PDFObject viewer library from a CDN. Our own code (report-pdf.ts) only
+  // ever calls `.save()` (a local browser download) — this branch is dead
+  // code we never reach — but Chrome's scanner flags the string's mere
+  // presence in the bundle, not reachability. This plugin strips that one
+  // case out of jsPDF's source at build time (replacing it with a throw,
+  // since it's unreachable for us anyway), which is the only way to remove
+  // the offending string without forking or replacing the whole library.
+  vite: () => ({
+    plugins: [
+      {
+        name: 'strip-jspdf-remote-pdfobject-branch',
+        transform(code, id) {
+          if (!id.includes('jspdf') || !code.includes('pdfobjectnewwindow')) return null;
+          const stripped = code.replace(
+            /case"pdfobjectnewwindow":[\s\S]*?(?=case"pdfjsnewwindow":)/,
+            'case"pdfobjectnewwindow":throw new Error("pdfobjectnewwindow output type is disabled in this build");',
+          );
+          if (stripped === code) {
+            throw new Error(
+              'strip-jspdf-remote-pdfobject-branch: expected pattern not found in ' + id + ' — jsPDF version likely changed shape; update the regex before shipping, or the remote-code string will ship again.',
+            );
+          }
+          return { code: stripped, map: null };
+        },
+      },
+    ],
+  }),
 });
