@@ -1,5 +1,5 @@
 import { listMessages, provisionApiKey } from '../../src/api-client';
-import { logInWithEmail, signUpWithEmail } from '../../src/auth';
+import { logInWithEmail, signInWithGoogle, signUpWithEmail } from '../../src/auth';
 import { getSettings, setSettings } from '../../src/storage';
 import { describeStatus } from '../../src/status-chip';
 import { describeReadConfidence } from '../../src/read-confidence-chip';
@@ -127,6 +127,13 @@ el('logIn').addEventListener('click', async () => {
 el('signUp').addEventListener('click', async () => {
   showAuth('Signing up…', false);
   await handleAuth(await signUpWithEmail(el<HTMLInputElement>('email').value.trim(), el<HTMLInputElement>('password').value));
+});
+document.getElementById('googleSignIn')?.addEventListener('click', async () => {
+  const googleBtn = document.getElementById('googleSignIn') as HTMLButtonElement | null;
+  if (googleBtn) googleBtn.disabled = true;
+  showAuth('Continuing with Google…', false);
+  await handleAuth(await signInWithGoogle());
+  if (googleBtn) googleBtn.disabled = false;
 });
 el<HTMLInputElement>('password').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') el('logIn').click();

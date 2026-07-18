@@ -1,5 +1,5 @@
 import { cancelSubscription, createCheckout, deleteMessage, exportMessageCsv, getBillingStatus, provisionApiKey } from '../../src/api-client';
-import { logInWithEmail, requestPasswordReset, signUpWithEmail } from '../../src/auth';
+import { logInWithEmail, requestPasswordReset, signInWithGoogle, signUpWithEmail } from '../../src/auth';
 import {
   getSavedAccounts,
   getSettings,
@@ -210,6 +210,14 @@ document.getElementById('logIn')?.addEventListener('click', async () => {
 document.getElementById('signUp')?.addEventListener('click', async () => {
   showAuthMessage('Signing up…', false);
   await handleAuthResult(await signUpWithEmail(emailInput.value.trim(), passwordInput.value));
+});
+
+document.getElementById('googleSignIn')?.addEventListener('click', async () => {
+  const googleBtn = document.getElementById('googleSignIn') as HTMLButtonElement | null;
+  if (googleBtn) googleBtn.disabled = true;
+  showAuthMessage('Continuing with Google…', false);
+  await handleAuthResult(await signInWithGoogle());
+  if (googleBtn) googleBtn.disabled = false;
 });
 
 togglePasswordBtn.addEventListener('click', () => {

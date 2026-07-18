@@ -39,6 +39,68 @@ export async function logInWithEmail(email: string, password: string): Promise<A
   return mapAuthResponse(data, error);
 }
 
+/**
+ * ADR-56 (Google sign-in). Supabase's own `signInWithOAuth` assumes a
+ * normal web page it can redirect the whole tab to — that doesn't exist for
+ * an MV3 extension. Instead: ask Supabase for the provider authorization
+ * URL without letting it redirect (`skipBrowserRedirect: true`), hand that
+ * URL to `chrome.identity.launchWebAuthFlow` (the extension-platform
+ * equivalent of a redirect flow, requires the `identity` permission),
+ * which opens it in a controlled window and returns the final callback URL
+ * once Supabase completes the exchange and redirects to this extension's
+ * fixed `https://<id>.chromiumapp.org/` URI (obtained via
+ * `chrome.identity.getRedirectURL()` — must be registered in the Supabase
+ * project's Auth > URL Configuration > Redirect URLs allow-list; the
+ * Google Cloud OAuth client's own redirect URI is Supabase's fixed
+ * `https://<project-ref>.supabase.co/auth/v1/callback`, a separate,
+ * one-time step in Google Cloud Console + Supabase's provider settings).
+ * Supabase returns tokens in the callback URL's fragment (implicit-style),
+ * which `setSession` uses to hydrate a real session identical in shape to
+ * the email/password paths, so `handleAuthResult` in options/popup needs
+ * no special-casing.
+ */
+export async function signInWithGoogle(): Promise<AuthResult> {
+  if (typeof chrome === 'undefined' || !chrome.identity?.launchWebAuthFlow) {
+    return { ok: false, message: 'Google sign-in is only available in the installed extension, not this preview.' };
+  }
+  const redirectTo = chrome.identity.getRedirectURL();
+  const client = getSupabaseAuthClient();
+  const { data, error } = await client.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo, skipBrowserRedirect: true },
+  });
+  if (error || !data?.url) return { ok: false, message: error?.message ?? 'Could not start Google sign-in.' };
+
+  let callbackUrl: string | undefined;
+  try {
+    callbackUrl = await chrome.identity.launchWebAuthFlow({ url: data.url, interactive: true });
+  } catch (e) {
+    // The user closing the Google auth window themselves also lands here —
+    // that's a cancellation, not a real error, so no scary message for it.
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes('did not approve') || message.includes('closed')) {
+      return { ok: false, message: 'Google sign-in was cancelled.' };
+    }
+    return { ok: false, message: 'Google sign-in failed to complete.' };
+  }
+  if (!callbackUrl) return { ok: false, message: 'Google sign-in was cancelled.' };
+
+  const fragment = new URL(callbackUrl).hash.replace(/^#/, '');
+  const params = new URLSearchParams(fragment);
+  const accessToken = params.get('access_token');
+  const refreshToken = params.get('refresh_token');
+  if (!accessToken || !refreshToken) {
+    const errorDescription = params.get('error_description');
+    return { ok: false, message: errorDescription ?? 'Google sign-in did not return a valid session.' };
+  }
+
+  const { data: sessionData, error: sessionError } = await client.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+  return mapAuthResponse(sessionData, sessionError);
+}
+
 export type PasswordResetRequestResult = { ok: true } | { ok: false; message: string };
 
 /**

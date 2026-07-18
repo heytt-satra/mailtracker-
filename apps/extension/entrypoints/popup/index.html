@@ -19,6 +19,9 @@
       .field input:focus { outline: none; border-color: var(--brand); background: var(--bg); }
       .auth-actions { display: flex; gap: 0.5rem; margin-top: 0.25rem; }
       .auth-actions .mt-btn { flex: 1; }
+      .oauth-divider { display: flex; align-items: center; gap: 0.5rem; margin: 0.6rem 0; font-size: 0.7rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+      .oauth-divider::before, .oauth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+      .mt-btn-google { width: 100%; }
       #authMsg { font-size: 0.8rem; min-height: 1.1em; margin-top: 0.55rem; color: var(--green); }
       #authMsg[data-error] { color: var(--red); }
 
@@ -81,6 +84,8 @@
         <button class="mt-btn mt-btn-primary" id="logIn">Log in</button>
         <button class="mt-btn mt-btn-ghost" id="signUp">Sign up</button>
       </div>
+      <div class="oauth-divider" role="separator">or</div>
+      <button type="button" class="mt-btn mt-btn-ghost mt-btn-google" id="googleSignIn">Continue with Google</button>
       <div id="authMsg" role="status" aria-live="polite"></div>
     </div>
 

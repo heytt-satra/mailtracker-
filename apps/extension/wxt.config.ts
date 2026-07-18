@@ -26,7 +26,12 @@ export default defineConfig({
     // permission declared or it fails with "Couldn't inject pageWorld.js" —
     // found live, post-deployment, via a real user's Gmail console errors;
     // verified against InboxSDK's own reference manifest before adding.
-    permissions: ['storage', 'notifications', 'alarms', 'scripting'],
+    // 'identity' backs Google sign-in (ADR-56, src/auth.ts::signInWithGoogle)
+    // via chrome.identity.launchWebAuthFlow — the extension-platform
+    // equivalent of a normal web redirect-based OAuth flow, which doesn't
+    // otherwise exist for an MV3 extension with no page of its own to
+    // redirect.
+    permissions: ['storage', 'notifications', 'alarms', 'scripting', 'identity'],
     // *.supabase.co covers Supabase's standard hosted project domain (the
     // options page's signup/login calls Supabase Auth directly, ADR-10). A
     // self-hosted Supabase instance would need its own origin added here.
