@@ -123,4 +123,13 @@ describe('GET /v1/admin/beacon-timing (ADR-57, Track B Phase 0 diagnostic)', () 
     );
     expect(res.status).toBe(400);
   });
+
+  it('rejects a non-UUID messageId with a clean 400 instead of crashing on the Postgres uuid column (found live via curl)', async () => {
+    const res = await messagesRoute.request(
+      '/v1/admin/beacon-timing?messageId=nonexistent',
+      { method: 'GET', headers: { 'X-Admin-Secret': 'the-real-secret' } },
+      { ADMIN_SECRET: 'the-real-secret', RATE_LIMITER_DO: ALWAYS_ALLOW_RATE_LIMITER_DO },
+    );
+    expect(res.status).toBe(400);
+  });
 });

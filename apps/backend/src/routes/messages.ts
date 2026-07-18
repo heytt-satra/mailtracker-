@@ -127,12 +127,18 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
  * with beacon position and fetch-sequence timing — everything needed to
  * answer Track B's make-or-break question by inspecting a real test send.
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 messagesRoute.get('/v1/admin/beacon-timing', async (c) => {
   const rateLimited = await checkAdminRateLimit(c);
   if (rateLimited) return rateLimited;
   if (!hasValidAdminSecret(c)) return c.json({ error: 'Unauthorized' }, 401);
   const messageId = c.req.query('messageId');
   if (!messageId) return c.json({ error: 'messageId query param is required' }, 400);
+  // messages.id is a Postgres uuid column — an invalid UUID literal makes
+  // Supabase throw, which without this check surfaced as an opaque 500
+  // (found live, via curl, testing this route right after deploying it).
+  if (!UUID_RE.test(messageId)) return c.json({ error: 'messageId must be a valid UUID' }, 400);
   const db = getSupabase(c.env);
   const events = await getRawEventTimingForMessage(db, messageId);
   return c.json({ messageId, events });
