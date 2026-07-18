@@ -1,11 +1,11 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { CreateMessageResponse } from '@mailtrack/shared';
 import type { Env, Variables } from '../types';
-import { getSupabase, hasActiveSubscription, insertBeaconTokens, insertLinkTokens, insertMessage } from '../db/client';
+import { getRawEventTimingForMessage, getSupabase, hasActiveSubscription, insertBeaconTokens, insertLinkTokens, insertMessage } from '../db/client';
 import { apiKeyAuth } from '../middleware/auth';
 import { randomToken } from '../lib/crypto';
-import { checkRateLimit, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
+import { checkRateLimit, getClientIp, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
 import { parseJsonBody } from '../lib/validate';
 
 export const messagesRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -119,6 +119,37 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
 
   return c.json(response, 201);
 });
+
+/**
+ * ADR-57 (Track B Phase 0, temporary — delete once the empirical test
+ * concludes, per docs/read-detection-plan.md). Read-only, admin-secret-gated
+ * diagnostic: returns every raw_events row for one message in arrival order,
+ * with beacon position and fetch-sequence timing — everything needed to
+ * answer Track B's make-or-break question by inspecting a real test send.
+ */
+messagesRoute.get('/v1/admin/beacon-timing', async (c) => {
+  const rateLimited = await checkAdminRateLimit(c);
+  if (rateLimited) return rateLimited;
+  if (!hasValidAdminSecret(c)) return c.json({ error: 'Unauthorized' }, 401);
+  const messageId = c.req.query('messageId');
+  if (!messageId) return c.json({ error: 'messageId query param is required' }, 400);
+  const db = getSupabase(c.env);
+  const events = await getRawEventTimingForMessage(db, messageId);
+  return c.json({ messageId, events });
+});
+
+function hasValidAdminSecret(c: Context<{ Bindings: Env; Variables: Variables }>): boolean {
+  const providedSecret = c.req.header('X-Admin-Secret');
+  return !!providedSecret && providedSecret === c.env.ADMIN_SECRET;
+}
+
+/** Same shared-secret-plus-per-IP-limit pattern as billing.ts's admin routes (ADR-48). */
+async function checkAdminRateLimit(c: Context<{ Bindings: Env; Variables: Variables }>) {
+  const ip = getClientIp(c.req.header('CF-Connecting-IP'));
+  const limit = readRateLimitInt(c.env.RATE_LIMIT_ADMIN_PER_MIN, 5);
+  const { allowed, retryAfterSeconds } = await checkRateLimit(c.env, `admin:ip:${ip}`, { limit, windowMs: ONE_MINUTE_MS, backoff: true });
+  return allowed ? null : rateLimitedResponse(c, retryAfterSeconds);
+}
 
 /**
  * Only http(s) URLs are worth rewriting into a tracked redirect — mailto:,

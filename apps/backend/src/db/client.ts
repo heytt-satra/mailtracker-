@@ -420,6 +420,32 @@ export async function insertRawEvent(
   return { id: data.id, occurredAt: params.occurredAt };
 }
 
+/**
+ * ADR-57 (Track B Phase 0, temporary). Raw beacon-fetch timing for one
+ * message, ordered by arrival — the exact data needed to answer Track B's
+ * make-or-break question (does Gmail's proxy pre-fetch a below-clip beacon
+ * immediately alongside the top pixel, or only once the recipient manually
+ * expands a clipped message?). Delete this alongside the /v1/admin/
+ * beacon-timing route once Phase 0 concludes, per docs/read-detection-plan.md.
+ */
+export async function getRawEventTimingForMessage(
+  db: SupabaseClient,
+  messageId: string,
+): Promise<Array<{ occurredAt: string; kind: string; beaconPosition: BeaconPosition | null; fetchSequenceMs: number | null }>> {
+  const { data, error } = await db
+    .from('raw_events')
+    .select('occurred_at, kind, beacon_position, fetch_sequence_ms')
+    .eq('message_id', messageId)
+    .order('occurred_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    occurredAt: row.occurred_at,
+    kind: row.kind,
+    beaconPosition: row.beacon_position,
+    fetchSequenceMs: row.fetch_sequence_ms,
+  }));
+}
+
 /** Resolves an IP against the ip_ranges table via the classify_ip_category() Postgres function (ADR-8). */
 export async function classifyIpCategory(db: SupabaseClient, ip: string): Promise<IntelCategory | null> {
   if (ip === 'unknown') return null;

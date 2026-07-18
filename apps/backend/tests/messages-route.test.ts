@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createMessageSchema, isTrackableUrl } from '../src/routes/messages';
+import { createMessageSchema, isTrackableUrl, messagesRoute } from '../src/routes/messages';
+
+/** Same stand-in as billing-route.test.ts — these tests exercise auth/secret gating, not the rate limiter itself. */
+const ALWAYS_ALLOW_RATE_LIMITER_DO = {
+  idFromName: () => 'fake-id',
+  get: () => ({ fetch: async () => new Response(JSON.stringify({ allowed: true, retryAfterSeconds: 0 })) }),
+};
 
 describe('isTrackableUrl', () => {
   it('accepts http and https URLs', () => {
@@ -74,5 +80,47 @@ describe('createMessageSchema (ADR-46 strict input validation)', () => {
   it('rejects a negative bodyLength', () => {
     const result = createMessageSchema.safeParse({ linkUrls: [], bodyLength: -1 });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('GET /v1/admin/beacon-timing (ADR-57, Track B Phase 0 diagnostic)', () => {
+  it('rejects a request with no admin secret header at all', async () => {
+    const res = await messagesRoute.request(
+      '/v1/admin/beacon-timing?messageId=msg-1',
+      { method: 'GET' },
+      { ADMIN_SECRET: 'the-real-secret', RATE_LIMITER_DO: ALWAYS_ALLOW_RATE_LIMITER_DO },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a header that does not match the real admin secret', async () => {
+    const res = await messagesRoute.request(
+      '/v1/admin/beacon-timing?messageId=msg-1',
+      { method: 'GET', headers: { 'X-Admin-Secret': 'a-guess' } },
+      { ADMIN_SECRET: 'the-real-secret', RATE_LIMITER_DO: ALWAYS_ALLOW_RATE_LIMITER_DO },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects requests once the per-IP admin rate limit is exceeded, even with a correct secret', async () => {
+    const blockingRateLimiterDO = {
+      idFromName: () => 'fake-id',
+      get: () => ({ fetch: async () => new Response(JSON.stringify({ allowed: false, retryAfterSeconds: 42 })) }),
+    };
+    const res = await messagesRoute.request(
+      '/v1/admin/beacon-timing?messageId=msg-1',
+      { method: 'GET', headers: { 'X-Admin-Secret': 'the-real-secret' } },
+      { ADMIN_SECRET: 'the-real-secret', RATE_LIMITER_DO: blockingRateLimiterDO },
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it('requires the messageId query param even with a correct secret', async () => {
+    const res = await messagesRoute.request(
+      '/v1/admin/beacon-timing',
+      { method: 'GET', headers: { 'X-Admin-Secret': 'the-real-secret' } },
+      { ADMIN_SECRET: 'the-real-secret', RATE_LIMITER_DO: ALWAYS_ALLOW_RATE_LIMITER_DO },
+    );
+    expect(res.status).toBe(400);
   });
 });
