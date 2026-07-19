@@ -50,12 +50,21 @@ export interface ComposeButtonDescriptor {
   type?: 'SEND_ACTION' | 'MODIFIER';
 }
 
+/** ADR-57 (status bar). Returned by ComposeView.addStatusBar — confirmed against the installed package's inboxsdk.js (StatusBar extends SimpleElementView, exposes a plain `.el` and `destroy()`). */
+export interface ComposeStatusBar {
+  el: HTMLElement;
+  destroy: () => void;
+}
+
 export interface ComposeView {
   getHTMLContent: () => string;
   setBodyHTML: (html: string) => void;
   getSubject: () => string;
   setSubject: (text: string) => void;
   getToRecipients: () => Contact[];
+  /** ADR-58 (individual-send mode). Confirmed against the installed package's inboxsdk.js (GmailComposeView.getCcRecipients/getBccRecipients, wrapped 1:1 by the public ComposeView). */
+  getCcRecipients: () => Contact[];
+  getBccRecipients: () => Contact[];
   /** ADR-40. Used both to strip a compose down to a single recipient (mail merge) and, generally, to set recipients programmatically. */
   setToRecipients: (emails: string[]) => void;
   send: (options?: { sendAndArchive?: boolean }) => void;
@@ -65,6 +74,8 @@ export interface ComposeView {
   insertLinkIntoBodyAtCursor: (text: string, url: string) => HTMLElement | null | void;
   /** ADR-42. Adds a custom button to the compose toolbar (the "Attach tracked PDF" action). */
   addButton: (descriptor: ComposeButtonDescriptor) => unknown;
+  /** ADR-57. Adds a small persistent bar under the compose toolbar — used for the "sending individually to N recipients" indicator (ADR-58). */
+  addStatusBar: (options?: { height?: number; orderHint?: number; addAboveNativeStatusBar?: boolean }) => ComposeStatusBar;
   on(event: 'presending', handler: (event: PresendingEvent) => void): void;
   on(event: 'scheduleSendMenuOpening', handler: (event: ScheduleSendMenuOpeningEvent) => void): void;
   on(event: 'sent', handler: (event: SentEvent) => void): void;

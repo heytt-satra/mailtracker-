@@ -14,6 +14,7 @@ import {
   upsertSavedAccount,
 } from './storage';
 import { recordSentMessage } from './sent-recording';
+import { combineRecipients } from './combine-recipients';
 import { appendDepthBeacons, appendTrackingPixel, extractLinkUrls, rewriteLinks } from './html-injection';
 import { formatRecipients } from './recipient-format';
 import { describeStatus, statusIconDataUrl } from './status-chip';
@@ -89,19 +90,29 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
       // bug must never be able to loop or silently eat the user's email).
       if (injectionAttempted) return;
       injectionAttempted = true;
-      const toRecipients = composeView.getToRecipients();
-      trackedRecipientEmails = toRecipients.map((r) => r.emailAddress);
+      // ADR-58: widened from To-only so a CC'd recipient's reply still
+      // correlates to this tracked thread — the mapping is per-thread, not
+      // per-recipient, so this is safe regardless of whether individual
+      // mode ends up splitting the send below.
+      const allRecipients = combineRecipients(composeView);
+      trackedRecipientEmails = allRecipients.map((r) => r.emailAddress);
       event.cancel();
 
       (async () => {
         const settings = await getSettings();
-        // ADR-40: mail merge is scoped to plain Send only, not the
+        // ADR-40/58: mail merge is scoped to plain Send only, not the
         // schedule-send path — combining "split into N sends" with "each
         // gets its own schedule time" is a real design question (same time
         // for all? individually pickable?) left for a later pass rather
         // than guessed at here.
-        if (settings.individualTrackingForGroupEmails && toRecipients.length > 1) {
-          trackedMsgId = await sendIndividuallyToRecipients(sdk, composeView, toRecipients);
+        //
+        // ADR-58: individual tracking now considers ALL recipients (To/CC/
+        // BCC combined, deduped), not just To — a single physical email
+        // with multiple recipients can't be attributed per-recipient since
+        // they'd all fetch the identical pixel URL, so CC/BCC recipients
+        // need the exact same split-into-N-sends treatment To already got.
+        if (settings.individualTrackingForGroupEmails && allRecipients.length > 1) {
+          trackedMsgId = await sendIndividuallyToRecipients(sdk, composeView, allRecipients);
         } else {
           trackedMsgId = await injectTrackingThenResume(composeView, () => composeView.send());
         }
@@ -119,7 +130,7 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
     composeView.on('scheduleSendMenuOpening', (event) => {
       if (injectionAttempted) return;
       injectionAttempted = true;
-      trackedRecipientEmails = composeView.getToRecipients().map((r) => r.emailAddress);
+      trackedRecipientEmails = combineRecipients(composeView).map((r) => r.emailAddress); // ADR-58, same reasoning as the presending handler above
       event.cancel();
 
       injectTrackingThenResume(composeView, () => composeView.openScheduleSendMenu()).then((msgId) => {
@@ -295,6 +306,19 @@ async function sendIndividuallyToRecipients(sdk: InboxSDKInstance, firstComposeV
       // Compose view may have been destroyed between cancel() and here.
     }
     return null;
+  }
+
+  // ADR-58 (Gmail-side surfacing). Individual-send mode silently rewrites
+  // one compose into N separate emails — worth a visible heads-up in Gmail
+  // itself rather than only showing up after the fact on the dashboard,
+  // since it's genuinely different behavior from what the user clicked
+  // Send expecting (a single email to a group).
+  try {
+    const statusBar = firstComposeView.addStatusBar({ height: 32 });
+    statusBar.el.textContent = `MailTrack: sending individually to ${recipients.length} recipients so opens can be tracked per person.`;
+    statusBar.el.style.cssText = 'display:flex;align-items:center;padding:0 12px;font-size:12.5px;color:#5f6368;background:#f1f3f4;';
+  } catch {
+    // Cosmetic only — never let a status-bar failure affect the actual sends below.
   }
 
   const subject = firstComposeView.getSubject();
