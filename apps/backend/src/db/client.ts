@@ -306,12 +306,17 @@ export function buildMessageSummary(row: MessageSummaryRow, stats: VerdictStats 
 export async function insertLinkTokens(
   db: SupabaseClient,
   messageId: string,
-  links: { token: string; originalUrl: string }[],
+  links: { token: string; originalUrl: string; reputationStatus?: 'safe' | 'unsafe' | null }[],
 ): Promise<void> {
   if (links.length === 0) return;
-  const { error } = await db
-    .from('link_tokens')
-    .insert(links.map((l) => ({ message_id: messageId, token: l.token, original_url: l.originalUrl })));
+  const { error } = await db.from('link_tokens').insert(
+    links.map((l) => ({
+      message_id: messageId,
+      token: l.token,
+      original_url: l.originalUrl,
+      reputation_status: l.reputationStatus ?? null,
+    })),
+  );
   if (error) throw error;
 }
 

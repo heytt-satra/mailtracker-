@@ -32,6 +32,7 @@ const bounceDetectionEnabledInput = document.getElementById('bounceDetectionEnab
 const followUpNotOpenedDaysInput = document.getElementById('followUpNotOpenedDays') as HTMLInputElement;
 const followUpOpenedNoReplyDaysInput = document.getElementById('followUpOpenedNoReplyDays') as HTMLInputElement;
 const individualTrackingForGroupEmailsInput = document.getElementById('individualTrackingForGroupEmails') as HTMLInputElement;
+const checkLinksForSafetyInput = document.getElementById('checkLinksForSafety') as HTMLInputElement;
 const statusEl = document.getElementById('status') as HTMLDivElement;
 
 const billingCard = document.getElementById('billingCard') as HTMLDivElement;
@@ -64,6 +65,7 @@ async function refreshView(): Promise<void> {
     followUpNotOpenedDaysInput.value = String(settings.followUpNotOpenedDays);
     followUpOpenedNoReplyDaysInput.value = String(settings.followUpOpenedNoReplyDays);
     individualTrackingForGroupEmailsInput.checked = settings.individualTrackingForGroupEmails;
+    checkLinksForSafetyInput.checked = settings.checkLinksForSafety;
     for (const key of NOTIFY_TOGGLE_KEYS) {
       const input = document.getElementById(key) as HTMLInputElement | null;
       if (input) input.checked = Boolean(settings[key]);
@@ -272,6 +274,7 @@ document.getElementById('save')?.addEventListener('click', async () => {
     followUpNotOpenedDays: notOpenedDays,
     followUpOpenedNoReplyDays: openedNoReplyDays,
     individualTrackingForGroupEmails: individualTrackingForGroupEmailsInput.checked,
+    checkLinksForSafety: checkLinksForSafetyInput.checked,
     ...notifyToggles,
   });
   statusEl.textContent = 'Saved.';

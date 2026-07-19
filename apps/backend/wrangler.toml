@@ -13,7 +13,8 @@ compatibility_date = "2024-11-01"
 enabled = true
 
 # Non-secret config. Secrets (SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_ANON_KEY, MAXMIND_LICENSE_KEY,
-# DODO_API_KEY, DODO_WEBHOOK_SECRET) are set via `wrangler secret put <NAME>` and must never be committed here.
+# DODO_API_KEY, DODO_WEBHOOK_SECRET, SAFE_BROWSING_API_KEY) are set via `wrangler secret put <NAME>` and must never be committed here.
+# SAFE_BROWSING_API_KEY is optional — ADR-59's URL reputation check fails open (unchecked) if it's unset.
 # SUPABASE_ANON_KEY isn't actually sensitive (it's Supabase's public client
 # key, safe to embed in the extension too) but is stored as a secret anyway
 # for tooling consistency.
@@ -55,6 +56,11 @@ RATE_LIMIT_AUTH_IP_PER_MIN = "10"
 RATE_LIMIT_AUTH_ACCOUNT_PER_MIN = "5"
 RATE_LIMIT_ADMIN_PER_MIN = "5"
 RATE_LIMIT_WEBHOOK_PER_MIN = "60"
+# ADR-59 (URL reputation checking). Per-user bounds one account's share;
+# the global bucket protects Safe Browsing's own shared quota even if every
+# user individually stays under their own limit.
+RATE_LIMIT_URL_REPUTATION_PER_MIN = "30"
+RATE_LIMIT_URL_REPUTATION_GLOBAL_PER_MIN = "500"
 
 # Classifier sweep (reads new raw_events, writes verdicts) runs every minute.
 # ADR-1 in PLAN.md: classification must never run inline on the pixel/click hot path.

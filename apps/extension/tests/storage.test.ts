@@ -55,6 +55,7 @@ describe('storage', () => {
       notifyOnRevival: true,
       notifyOnFollowUp: true,
       individualTrackingForGroupEmails: false,
+      checkLinksForSafety: true,
     });
   });
 

@@ -154,6 +154,8 @@ export interface CreateMessageResponse {
   linkMap: Record<string, string>; // originalUrl -> tracked redirect URL
   /** Present only when bodyLength exceeded the long-message threshold (ADR-19) — absent means "don't bother injecting depth beacons." */
   beaconUrls?: { mid: string; bottom: string };
+  /** ADR-59. Original (pre-rewrite) URLs Google Safe Browsing flagged as a threat match — absent/empty means either nothing was flagged or the check was unavailable (fails open, never blocks). A warning signal for the client to act on, not a rejection. */
+  flaggedLinks?: string[];
 }
 
 export interface MessageStatusResponse {

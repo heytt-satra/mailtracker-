@@ -114,7 +114,14 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
         if (settings.individualTrackingForGroupEmails && allRecipients.length > 1) {
           trackedMsgId = await sendIndividuallyToRecipients(sdk, composeView, allRecipients);
         } else {
-          trackedMsgId = await injectTrackingThenResume(composeView, () => composeView.send());
+          const { msgId, cancelled } = await injectTrackingThenResume(composeView, () => composeView.send());
+          trackedMsgId = msgId;
+          // ADR-59: the user declined an unsafe-link warning — nothing was
+          // sent, so a genuine next click of Send needs to re-enter this
+          // handler fresh rather than being swallowed by the resumed-send
+          // guard above (which exists to ignore OUR OWN programmatic
+          // resume re-firing presending, not a real second user click).
+          if (cancelled) injectionAttempted = false;
         }
       })();
     });
@@ -133,8 +140,9 @@ function registerComposeTracking(sdk: InboxSDKInstance): void {
       trackedRecipientEmails = combineRecipients(composeView).map((r) => r.emailAddress); // ADR-58, same reasoning as the presending handler above
       event.cancel();
 
-      injectTrackingThenResume(composeView, () => composeView.openScheduleSendMenu()).then((msgId) => {
+      injectTrackingThenResume(composeView, () => composeView.openScheduleSendMenu()).then(({ msgId, cancelled }) => {
         trackedMsgId = msgId;
+        if (cancelled) injectionAttempted = false; // ADR-59, same reasoning as the presending handler above
       });
     });
 
@@ -219,9 +227,21 @@ async function attachTrackedPdf(composeView: ComposeView, file: File): Promise<v
   composeView.insertLinkIntoBodyAtCursor(file.name, url);
 }
 
+export interface InjectTrackingResult {
+  msgId: string | null;
+  /**
+   * ADR-59. True only when the user explicitly declined to send after an
+   * unsafe-link warning — the one case where tracking logic genuinely stops
+   * a send rather than failing open around it. Every other skip/fail path
+   * still calls `resume()` unconditionally; this is the sole opt-out.
+   */
+  cancelled: boolean;
+}
+
 /**
  * Returns the created msgId on success, or null if tracking was
- * skipped/failed (the resume action always proceeds either way — NFR2).
+ * skipped/failed (the resume action always proceeds either way — NFR2,
+ * except the ADR-59 unsafe-link-declined case, see InjectTrackingResult).
  * Every skip/fail path logs to console.error: fail-open means never
  * blocking or delaying the send, it does NOT mean failing invisibly. A
  * silent catch here was previously indistinguishable from "nothing went
@@ -233,8 +253,9 @@ async function attachTrackedPdf(composeView: ComposeView, file: File): Promise<v
  * injection logic either way, just a different way of letting Gmail's own
  * flow continue afterward.
  */
-async function injectTrackingThenResume(composeView: ComposeView, resume: () => void): Promise<string | null> {
+async function injectTrackingThenResume(composeView: ComposeView, resume: () => void): Promise<InjectTrackingResult> {
   let msgId: string | null = null;
+  let cancelled = false;
   try {
     const settings = await getSettings();
     if (!settings.trackingEnabledByDefault || !settings.apiKey) {
@@ -248,6 +269,18 @@ async function injectTrackingThenResume(composeView: ComposeView, resume: () => 
       const subject = composeView.getSubject();
       const recipient = formatRecipients(composeView.getToRecipients());
       const result = await createMessage(settings.apiKey, { linkUrls, subject, recipient, bodyLength: html.length }, COMPOSE_INJECTION_TIMEOUT_MS);
+
+      // ADR-59. A real, deliberate interrupt — window.confirm() is
+      // synchronous, so this blocks only as long as the user takes to
+      // decide, the same tradeoff Gmail's own native "did you forget an
+      // attachment?" prompt makes. Opt-out via settings.checkLinksForSafety.
+      if (settings.checkLinksForSafety && result.flaggedLinks && result.flaggedLinks.length > 0) {
+        if (!confirmUnsafeLinks(result.flaggedLinks)) {
+          cancelled = true;
+          return { msgId: null, cancelled };
+        }
+      }
+
       let trackedHtml = appendTrackingPixel(rewriteLinks(html, result.linkMap), result.pixelUrl);
       if (result.beaconUrls) {
         // ADR-19: only present when the backend judged this body long enough
@@ -269,14 +302,24 @@ async function injectTrackingThenResume(composeView: ComposeView, resume: () => 
       console.error('[MailTrack] tracking injection failed, email will send untracked:', err);
     }
   } finally {
-    try {
-      resume();
-    } catch {
-      // Compose view may have been destroyed (user closed the draft) between
-      // cancel() and here; nothing more we can or should do.
+    if (!cancelled) {
+      try {
+        resume();
+      } catch {
+        // Compose view may have been destroyed (user closed the draft) between
+        // cancel() and here; nothing more we can or should do.
+      }
     }
   }
-  return msgId;
+  return { msgId, cancelled };
+}
+
+/** ADR-59. window.confirm works fine here — this content script runs in Gmail's real page context, not an isolated/service-worker context. */
+function confirmUnsafeLinks(flaggedLinks: string[]): boolean {
+  const list = flaggedLinks.map((url) => `• ${url}`).join('\n');
+  return window.confirm(
+    `MailTrack flagged ${flaggedLinks.length} link(s) in this email as potentially unsafe (Google Safe Browsing):\n\n${list}\n\nSend anyway?`,
+  );
 }
 
 /** Small stagger between each split send — an unavoidable-by-nature client-side automation risk, but spacing them out looks less like a burst than firing all N back-to-back. */

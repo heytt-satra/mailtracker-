@@ -36,6 +36,10 @@ export interface Env {
   RATE_LIMIT_AUTH_ACCOUNT_PER_MIN?: string;
   RATE_LIMIT_ADMIN_PER_MIN?: string;
   RATE_LIMIT_WEBHOOK_PER_MIN?: string;
+  /** ADR-59. Per-user throttle on the Safe Browsing check — separate from RATE_LIMIT_WRITES_PER_MIN since one send can check several URLs. */
+  RATE_LIMIT_URL_REPUTATION_PER_MIN?: string;
+  /** ADR-59. Safe Browsing's own quota is shared across the whole product, not per-user — this bucket protects it even if every user stays under their own per-user limit. */
+  RATE_LIMIT_URL_REPUTATION_GLOBAL_PER_MIN?: string;
   /** ADR-36. 'test' | 'live' — selects test.dodopayments.com vs live.dodopayments.com. Defaults to 'test' (see routes/billing.ts) so a missing/unset var fails toward the sandbox, never accidentally live. */
   DODO_MODE?: string;
   /** Secret API key from the Dodo dashboard — set via `wrangler secret put DODO_API_KEY`, never committed. */
@@ -49,6 +53,15 @@ export interface Env {
   ATTACHMENTS_BUCKET: R2Bucket;
   /** ADR-44. Gates POST /v1/admin/grant-lifetime-subscriptions — a one-off internal action, not part of the public API surface, so it's a shared-secret header rather than a per-user API key. Set via `wrangler secret put ADMIN_SECRET`. */
   ADMIN_SECRET: string;
+  /**
+   * ADR-59. Google Safe Browsing Lookup API v4 key (Google Cloud Console —
+   * enable "Safe Browsing API", create an API key). Optional: if unset,
+   * lib/safe-browsing.ts::checkUrlsReputation fails open and every link
+   * comes back unchecked (null), same as a network error or timeout — this
+   * is a bonus safety signal, never a hard requirement for tracking to
+   * work. Set via `wrangler secret put SAFE_BROWSING_API_KEY`.
+   */
+  SAFE_BROWSING_API_KEY?: string;
 }
 
 export interface Variables {

@@ -7,6 +7,7 @@ import { apiKeyAuth } from '../middleware/auth';
 import { randomToken } from '../lib/crypto';
 import { checkRateLimit, getClientIp, ONE_MINUTE_MS, rateLimitedResponse, readRateLimitInt } from '../lib/rate-limit';
 import { parseJsonBody } from '../lib/validate';
+import { checkUrlsReputation, type ReputationStatus } from '../lib/safe-browsing';
 
 export const messagesRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -64,6 +65,26 @@ export const createMessageSchema = z
   })
   .strict();
 
+/**
+ * ADR-59. Two buckets: per-user (bounds one account's share) and a shared
+ * `url-reputation:global` bucket (Safe Browsing's own quota is one pool
+ * across the whole product, not per-user — a well-behaved user population
+ * could still exhaust it collectively). Hitting either limit skips the
+ * check for this request (every URL comes back unchecked/null) rather than
+ * rejecting the message — this is a bonus signal, not a required gate.
+ */
+async function checkUrlsReputationRateLimited(env: Env, userId: string, urls: string[]): Promise<Map<string, ReputationStatus>> {
+  if (urls.length === 0) return new Map();
+  const perUserLimit = readRateLimitInt(env.RATE_LIMIT_URL_REPUTATION_PER_MIN, 30);
+  const globalLimit = readRateLimitInt(env.RATE_LIMIT_URL_REPUTATION_GLOBAL_PER_MIN, 500);
+  const [perUser, global] = await Promise.all([
+    checkRateLimit(env, `url-reputation:${userId}`, { limit: perUserLimit, windowMs: ONE_MINUTE_MS, backoff: false }),
+    checkRateLimit(env, 'url-reputation:global', { limit: globalLimit, windowMs: ONE_MINUTE_MS, backoff: false }),
+  ]);
+  if (!perUser.allowed || !global.allowed) return new Map(urls.map((u) => [u, null]));
+  return checkUrlsReputation(env, urls);
+}
+
 messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
   const userId = c.get('userId');
 
@@ -97,7 +118,14 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
 
   const message = await insertMessage(db, { userId, gmailMessageId: body.gmailMessageId, subject, recipient, pixelToken });
 
-  const linkTokens = validLinkUrls.map((originalUrl) => ({ token: randomToken(), originalUrl }));
+  // ADR-59. A warning signal layered on top of tracking, never a gate — see
+  // checkUrlsReputationRateLimited's doc comment for the fail-open shape.
+  const reputationByUrl = await checkUrlsReputationRateLimited(c.env, userId, validLinkUrls);
+  const linkTokens = validLinkUrls.map((originalUrl) => ({
+    token: randomToken(),
+    originalUrl,
+    reputationStatus: reputationByUrl.get(originalUrl) ?? null,
+  }));
   await insertLinkTokens(db, message.id, linkTokens);
 
   const origin = new URL(c.req.url).origin;
@@ -106,6 +134,8 @@ messagesRoute.post('/v1/messages', apiKeyAuth, async (c) => {
     pixelUrl: `${origin}/p/${pixelToken}.gif`,
     linkMap: Object.fromEntries(linkTokens.map((l) => [l.originalUrl, `${origin}/l/${l.token}`])),
   };
+  const flaggedLinks = linkTokens.filter((l) => l.reputationStatus === 'unsafe').map((l) => l.originalUrl);
+  if (flaggedLinks.length > 0) response.flaggedLinks = flaggedLinks;
 
   if (typeof body.bodyLength === 'number' && body.bodyLength > LONG_MESSAGE_BEACON_THRESHOLD_BYTES) {
     const midToken = randomToken();

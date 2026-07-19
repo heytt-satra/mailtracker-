@@ -40,6 +40,14 @@ export interface MailTrackSettings {
    * choose deliberately, not something silently turned on.
    */
   individualTrackingForGroupEmails: boolean;
+  /**
+   * ADR-59. On by default — unlike individualTrackingForGroupEmails, this
+   * isn't a behavior change to the email itself, only an extra pre-send
+   * check (Google Safe Browsing) that can surface a confirm dialog if a
+   * link looks unsafe. Fails open regardless (NFR2): if the backend check
+   * is unavailable, nothing is flagged and the send proceeds normally.
+   */
+  checkLinksForSafety: boolean;
 }
 
 const DEFAULT_SETTINGS: MailTrackSettings = {
@@ -58,6 +66,7 @@ const DEFAULT_SETTINGS: MailTrackSettings = {
   notifyOnRevival: true,
   notifyOnFollowUp: true,
   individualTrackingForGroupEmails: false,
+  checkLinksForSafety: true,
 };
 
 const SETTINGS_KEY = 'mailtrack:settings';
