@@ -216,6 +216,48 @@ export interface MessageListResponse {
   nextOffset: number | null;
 }
 
+/** ADR-60 (team accounts). Same shape/pagination as MessageListResponse — backs GET /v1/orgs/messages, just scoped to every member of the caller's org instead of one user. */
+export type OrgMessagesResponse = MessageListResponse;
+
+export interface OrgMemberSummary {
+  email: string | null;
+  role: 'owner' | 'member';
+  joinedAt: string;
+}
+
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+  role: 'owner' | 'member';
+}
+
+/** GET /v1/orgs/me. `organization: null` means the caller isn't in a team — `members` is omitted in that case. */
+export interface GetOrganizationResponse {
+  organization: OrganizationSummary | null;
+  members?: OrgMemberSummary[];
+}
+
+export interface CreateOrganizationRequest {
+  name: string;
+}
+
+export interface CreateOrganizationResponse {
+  organization: OrganizationSummary;
+}
+
+export interface CreateInviteResponse {
+  code: string;
+  expiresAt: string;
+}
+
+export interface JoinOrganizationRequest {
+  code: string;
+}
+
+export interface JoinOrganizationResponse {
+  organization: OrganizationSummary;
+}
+
 /**
  * ADR-30. What the background poller notifies on. Previously hardcoded to
  * only 'opened'/'clicked' in both the backend query and the extension's

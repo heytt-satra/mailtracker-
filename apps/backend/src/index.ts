@@ -12,6 +12,7 @@ import { repliesRoute } from './routes/replies';
 import { billingRoute } from './routes/billing';
 import { reportsRoute } from './routes/reports';
 import { attachmentsRoute } from './routes/attachments';
+import { organizationsRoute } from './routes/organizations';
 import { LANDING_PAGE_HTML } from './pages/landing';
 import { PRIVACY_POLICY_HTML } from './pages/privacy';
 import { getSupabase } from './db/client';
@@ -54,6 +55,7 @@ app.route('/', repliesRoute);
 app.route('/', billingRoute);
 app.route('/', reportsRoute);
 app.route('/', attachmentsRoute);
+app.route('/', organizationsRoute);
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

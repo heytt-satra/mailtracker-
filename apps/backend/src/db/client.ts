@@ -723,3 +723,114 @@ export async function getMessageTimeline(db: SupabaseClient, messageId: string):
     };
   });
 }
+
+// ==========================================================================
+// ADR-60 (team accounts, C1). No org_id column exists on `messages` —
+// shared visibility is computed here by joining organization_members
+// against messages.user_id at query time, so message creation never
+// touches these tables. A user can only belong to one org at a time for
+// v1, enforced in the routes (organizations.ts), not the schema.
+// ==========================================================================
+
+export interface OrganizationRow {
+  id: string;
+  name: string;
+  owner_user_id: string;
+}
+
+export async function getOrganizationForUser(
+  db: SupabaseClient,
+  userId: string,
+): Promise<{ organization: OrganizationRow; role: 'owner' | 'member' } | null> {
+  const { data, error } = await db
+    .from('organization_members')
+    .select('role, organizations(id, name, owner_user_id)')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const org = Array.isArray(data.organizations) ? data.organizations[0] : data.organizations;
+  if (!org) return null;
+  return { organization: org, role: data.role as 'owner' | 'member' };
+}
+
+export async function createOrganization(db: SupabaseClient, ownerUserId: string, name: string): Promise<OrganizationRow> {
+  const { data: org, error: orgError } = await db.from('organizations').insert({ name, owner_user_id: ownerUserId }).select('id, name, owner_user_id').single();
+  if (orgError) throw orgError;
+  const { error: memberError } = await db.from('organization_members').insert({ org_id: org.id, user_id: ownerUserId, role: 'owner' });
+  if (memberError) throw memberError;
+  return org;
+}
+
+export interface OrgMemberRow {
+  user_id: string;
+  role: 'owner' | 'member';
+  joined_at: string;
+  email: string | null;
+}
+
+export async function listOrganizationMembers(db: SupabaseClient, orgId: string): Promise<OrgMemberRow[]> {
+  const { data, error } = await db.from('organization_members').select('user_id, role, joined_at, users(email)').eq('org_id', orgId).order('joined_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row) => {
+    const user = Array.isArray(row.users) ? row.users[0] : row.users;
+    return { user_id: row.user_id, role: row.role as 'owner' | 'member', joined_at: row.joined_at, email: user?.email ?? null };
+  });
+}
+
+export async function createOrgInvite(
+  db: SupabaseClient,
+  params: { orgId: string; token: string; createdBy: string; expiresAt: string },
+): Promise<void> {
+  const { error } = await db.from('organization_invites').insert({ org_id: params.orgId, token: params.token, created_by: params.createdBy, expires_at: params.expiresAt });
+  if (error) throw error;
+}
+
+export interface OrgInviteRow {
+  id: string;
+  org_id: string;
+  expires_at: string;
+  used_at: string | null;
+}
+
+export async function getOrgInviteByToken(db: SupabaseClient, token: string): Promise<OrgInviteRow | null> {
+  const { data, error } = await db.from('organization_invites').select('id, org_id, expires_at, used_at').eq('token', token).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function redeemOrgInvite(db: SupabaseClient, inviteId: string, orgId: string, userId: string): Promise<void> {
+  const { error: memberError } = await db.from('organization_members').insert({ org_id: orgId, user_id: userId, role: 'member' });
+  if (memberError) throw memberError;
+  const { error: inviteError } = await db.from('organization_invites').update({ used_at: new Date().toISOString(), used_by_user_id: userId }).eq('id', inviteId);
+  if (inviteError) throw inviteError;
+}
+
+export async function removeOrgMember(db: SupabaseClient, orgId: string, userId: string): Promise<void> {
+  const { error } = await db.from('organization_members').delete().eq('org_id', orgId).eq('user_id', userId);
+  if (error) throw error;
+}
+
+/** Cascades to organization_members and organization_invites (on delete cascade, 0009_add_organizations.sql). */
+export async function deleteOrganization(db: SupabaseClient, orgId: string): Promise<void> {
+  const { error } = await db.from('organizations').delete().eq('id', orgId);
+  if (error) throw error;
+}
+
+/** Same pagination/shape as listMessagesForUser, scoped to every member of one org instead of a single user_id. */
+export async function listMessagesForOrg(
+  db: SupabaseClient,
+  memberUserIds: string[],
+  offset: number,
+): Promise<{ rows: MessageSummaryRow[]; nextOffset: number | null }> {
+  if (memberUserIds.length === 0) return { rows: [], nextOffset: null };
+  const { data, error } = await db
+    .from('messages')
+    .select('id, subject, recipient, status, sent_at, bounce_detected_at, bounce_reason, reply_detected_at')
+    .in('user_id', memberUserIds)
+    .order('sent_at', { ascending: false })
+    .range(offset, offset + LIST_PAGE_SIZE - 1);
+  if (error) throw error;
+  const rows = data ?? [];
+  return { rows, nextOffset: rows.length === LIST_PAGE_SIZE ? offset + LIST_PAGE_SIZE : null };
+}
