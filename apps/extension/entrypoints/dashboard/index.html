@@ -13,6 +13,8 @@
       .dash-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
       .settings-link { font-size: 0.82rem; color: var(--brand); text-decoration: none; border: 1px solid var(--border); padding: 0.4rem 0.75rem; border-radius: var(--radius-sm); }
       .settings-link:hover { background: var(--bg-soft); }
+      .dash-header-right { display: flex; align-items: center; gap: 0.6rem; }
+      #teamViewSelect { font-size: 0.82rem; color: var(--ink); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; background: var(--bg); }
       h1 { font-size: 1.15rem; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
       .subtitle { color: var(--muted); font-size: 0.85rem; margin: 0 0 1.5rem; }
 
@@ -129,7 +131,13 @@
         <img src="logo.svg" alt="" />
         <span class="wordmark">Mail<span>Track</span></span>
       </div>
-      <a class="settings-link" href="options.html">Settings &amp; data</a>
+      <div class="dash-header-right">
+        <select id="teamViewSelect" style="display:none">
+          <option value="mine">My messages</option>
+          <option value="team">Team messages</option>
+        </select>
+        <a class="settings-link" href="options.html">Settings &amp; data</a>
+      </div>
     </div>
     <h1>Dashboard</h1>
     <p class="subtitle">Verified opens, clicks, and replies only — never a raw pixel fetch.</p>

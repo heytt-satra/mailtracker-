@@ -1,4 +1,4 @@
-import { getMessageTimeline, getReports, listMessages } from '../../src/api-client';
+import { getMessageTimeline, getOrganization, getReports, listMessages, listOrgMessages } from '../../src/api-client';
 import { formatSentAt, truncateSubject } from '../../src/dashboard-format';
 import { getFollowUpSuggestion, type FollowUpThresholds } from '../../src/follow-up';
 import { getSettings } from '../../src/storage';
@@ -12,6 +12,7 @@ const loadingEl = document.getElementById('loading') as HTMLParagraphElement;
 const content = document.getElementById('content') as HTMLDivElement;
 const tbody = document.getElementById('messageTableBody') as HTMLTableSectionElement;
 const emptyState = document.getElementById('emptyState') as HTMLParagraphElement;
+const EMPTY_STATE_DEFAULT_TEXT = emptyState.textContent ?? '';
 const filteredEmptyState = document.getElementById('filteredEmptyState') as HTMLParagraphElement;
 const loadMoreButton = document.getElementById('loadMore') as HTMLButtonElement;
 const refreshButton = document.getElementById('refresh') as HTMLButtonElement;
@@ -21,6 +22,8 @@ const statTotalEl = document.getElementById('statTotal') as HTMLDivElement;
 const statOpenedEl = document.getElementById('statOpened') as HTMLDivElement;
 const statClickedEl = document.getElementById('statClicked') as HTMLDivElement;
 const statFollowUpEl = document.getElementById('statFollowUp') as HTMLDivElement;
+
+const teamViewSelect = document.getElementById('teamViewSelect') as HTMLSelectElement;
 
 const tabRow = document.getElementById('tabRow') as HTMLDivElement;
 const messagesTab = document.getElementById('messagesTab') as HTMLButtonElement;
@@ -63,6 +66,12 @@ const PAGE_SIZE = 50; // must match apps/backend LIST_PAGE_SIZE
 
 let apiKey: string | null = null;
 let nextOffset: number | null = 0;
+/** ADR-60 (team accounts). Toggled via #teamViewSelect, only shown/usable when GET /v1/orgs/me confirms the signed-in user is actually in a team. */
+let viewingTeam = false;
+
+function fetchMessagesPage(key: string, offset: number) {
+  return viewingTeam ? listOrgMessages(key, offset) : listMessages(key, offset);
+}
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 // Read once at init from settings — the dashboard doesn't itself edit these
 // (that's the options page), so a snapshot is enough for the session.
@@ -91,9 +100,36 @@ async function init(): Promise<void> {
 
   tabRow.style.display = '';
   content.style.display = '';
+
+  // ADR-60 (team accounts). Only reveal the toggle if the user is actually
+  // in a team — a failed/absent lookup just means "no team", not an error
+  // worth surfacing on top of the dashboard's primary load.
+  try {
+    const { organization } = await getOrganization(apiKey);
+    teamViewSelect.style.display = organization ? '' : 'none';
+  } catch {
+    teamViewSelect.style.display = 'none';
+  }
+
   await loadPage();
   startPolling();
 }
+
+teamViewSelect.addEventListener('change', () => {
+  viewingTeam = teamViewSelect.value === 'team';
+  // Switching views is a different dataset entirely — reset every bit of
+  // loaded/rendered state rather than trying to merge two views' worth of
+  // messages into the same table.
+  messagesById.clear();
+  rowsById.clear();
+  expandedRows.clear();
+  tbody.innerHTML = '';
+  nextOffset = 0;
+  loadPage().catch(() => {
+    emptyState.textContent = 'Could not load messages for this view. Try again in a moment.';
+    emptyState.style.display = '';
+  });
+});
 
 function showMessagesTab(): void {
   messagesTab.classList.add('active');
@@ -440,8 +476,9 @@ function buildRow(message: MessageSummary): HTMLTableRowElement {
 async function loadPage(): Promise<void> {
   if (!apiKey || nextOffset === null) return;
   loadMoreButton.style.display = 'none';
+  emptyState.textContent = EMPTY_STATE_DEFAULT_TEXT; // clears any error text a previous failed load (e.g. switching team views) left behind
 
-  const { messages, nextOffset: newNextOffset } = await listMessages(apiKey, nextOffset);
+  const { messages, nextOffset: newNextOffset } = await fetchMessagesPage(apiKey, nextOffset);
   nextOffset = newNextOffset;
 
   for (const message of messages) {
@@ -464,7 +501,7 @@ async function pollRefresh(): Promise<void> {
   const seenThisPoll = new Set<string>();
 
   for (let page = 0; page < pagesLoaded; page++) {
-    const { messages } = await listMessages(apiKey, page * PAGE_SIZE);
+    const { messages } = await fetchMessagesPage(apiKey, page * PAGE_SIZE);
     for (const message of messages) {
       seenThisPoll.add(message.msgId);
       messagesById.set(message.msgId, message);
