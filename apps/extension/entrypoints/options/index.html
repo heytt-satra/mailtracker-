@@ -70,6 +70,8 @@
 
       #accountsCard { display: none; }
       #accountsCard.visible { display: block; }
+      #teamCard { display: none; }
+      #teamCard.visible { display: block; }
       #accountsList { margin-bottom: 0.85rem; }
       .account-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.55rem 0; border-bottom: 1px solid var(--border-soft); font-size: 0.85rem; }
       .account-row:last-child { border-bottom: none; }
@@ -77,6 +79,11 @@
       .account-row .account-active-tag { font-size: 0.72rem; font-weight: 600; color: var(--green); margin-left: 0.4rem; }
       .account-row .account-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
       .account-row .account-actions button { font-size: 0.75rem; padding: 0.25rem 0.6rem; }
+
+      .team-actions-row { display: flex; gap: 1rem; }
+      .team-action-col { flex: 1; min-width: 0; }
+      .team-action-col .mt-btn { width: 100%; }
+      .team-name-display { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.75rem; }
       #accountsEmpty { font-size: 0.82rem; color: var(--ink-soft); margin: 0 0 0.85rem; }
     </style>
   </head>
@@ -167,6 +174,38 @@
         <button class="mt-btn mt-btn-ghost" id="cancelSubscriptionBtn">Cancel subscription</button>
       </div>
       <div id="billingStatus" role="status" aria-live="polite" class="hint"></div>
+    </div>
+
+    <div class="card" id="teamCard" aria-labelledby="team-heading">
+      <h2 id="team-heading">Team</h2>
+      <p class="card-hint">Share visibility into tracked sends with teammates. Joining a team doesn't grant your own free tracking — you still need your own subscription to track new emails; it only lets you see teammates' already-tracked sends.</p>
+
+      <div id="teamNotInPanel">
+        <div class="team-actions-row">
+          <div class="team-action-col">
+            <label class="field-label" for="teamName">Team name</label>
+            <input type="text" id="teamName" placeholder="e.g. Sales team" />
+            <button class="mt-btn mt-btn-primary" id="createTeamBtn">Create a team</button>
+          </div>
+          <div class="team-action-col">
+            <label class="field-label" for="teamJoinCode">Invite code</label>
+            <input type="text" id="teamJoinCode" placeholder="Paste a code from a teammate" />
+            <button class="mt-btn mt-btn-ghost" id="joinTeamBtn">Join a team</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="teamInPanel" style="display:none">
+        <p id="teamNameDisplay" class="team-name-display"></p>
+        <div id="teamMembersList"></div>
+        <div class="button-row">
+          <button class="mt-btn mt-btn-ghost" id="inviteTeamBtn">Generate invite code</button>
+          <button class="mt-btn mt-btn-ghost" id="leaveTeamBtn">Leave team</button>
+          <button class="mt-btn mt-btn-ghost" id="deleteTeamBtn" style="display:none">Delete team</button>
+        </div>
+      </div>
+
+      <div id="teamStatus" role="status" aria-live="polite" class="hint"></div>
     </div>
 
     <div class="card" id="accountsCard" aria-labelledby="accounts-heading">

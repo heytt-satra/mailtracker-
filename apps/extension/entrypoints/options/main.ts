@@ -1,4 +1,18 @@
-import { cancelSubscription, createCheckout, deleteMessage, exportMessageCsv, getBillingStatus, provisionApiKey } from '../../src/api-client';
+import {
+  cancelSubscription,
+  createCheckout,
+  createOrgInvite,
+  createOrganization,
+  deleteMessage,
+  deleteOrganization,
+  exportMessageCsv,
+  getBillingStatus,
+  getOrganization,
+  joinOrganization,
+  leaveOrganization,
+  MailTrackApiError,
+  provisionApiKey,
+} from '../../src/api-client';
 import { logInWithEmail, requestPasswordReset, signInWithGoogle, signUpWithEmail } from '../../src/auth';
 import {
   getSavedAccounts,
@@ -49,6 +63,20 @@ const accountsListEl = document.getElementById('accountsList') as HTMLDivElement
 const saveAccountGmailEmailInput = document.getElementById('saveAccountGmailEmail') as HTMLInputElement;
 const accountsStatusEl = document.getElementById('accountsStatus') as HTMLDivElement;
 
+const teamCard = document.getElementById('teamCard') as HTMLDivElement;
+const teamNotInPanel = document.getElementById('teamNotInPanel') as HTMLDivElement;
+const teamInPanel = document.getElementById('teamInPanel') as HTMLDivElement;
+const teamNameInput = document.getElementById('teamName') as HTMLInputElement;
+const teamJoinCodeInput = document.getElementById('teamJoinCode') as HTMLInputElement;
+const createTeamBtn = document.getElementById('createTeamBtn') as HTMLButtonElement;
+const joinTeamBtn = document.getElementById('joinTeamBtn') as HTMLButtonElement;
+const teamNameDisplayEl = document.getElementById('teamNameDisplay') as HTMLParagraphElement;
+const teamMembersListEl = document.getElementById('teamMembersList') as HTMLDivElement;
+const inviteTeamBtn = document.getElementById('inviteTeamBtn') as HTMLButtonElement;
+const leaveTeamBtn = document.getElementById('leaveTeamBtn') as HTMLButtonElement;
+const deleteTeamBtn = document.getElementById('deleteTeamBtn') as HTMLButtonElement;
+const teamStatusEl = document.getElementById('teamStatus') as HTMLDivElement;
+
 async function refreshView(): Promise<void> {
   const settings = await getSettings();
   const signedIn = !!settings.apiKey;
@@ -56,8 +84,10 @@ async function refreshView(): Promise<void> {
   signedInPanel.classList.toggle('visible', signedIn);
   billingCard.classList.toggle('visible', signedIn);
   accountsCard.classList.toggle('visible', signedIn);
+  teamCard.classList.toggle('visible', signedIn);
   if (signedIn) {
     await renderAccounts();
+    await refreshTeamView(settings.apiKey!);
     signedInEmailEl.textContent = settings.accountEmail ? `Signed in as ${settings.accountEmail}` : 'API key active';
     trackingEnabledInput.checked = settings.trackingEnabledByDefault;
     notificationsEnabledInput.checked = settings.notificationsEnabled;
@@ -138,6 +168,142 @@ async function renderAccounts(): Promise<void> {
     accountsListEl.appendChild(row);
   }
 }
+
+/** ADR-60 (team accounts). Renders either the create/join panel or the in-team panel, driven entirely by GET /v1/orgs/me. */
+async function refreshTeamView(apiKey: string): Promise<void> {
+  try {
+    const { organization, members } = await getOrganization(apiKey);
+    if (!organization) {
+      teamNotInPanel.style.display = '';
+      teamInPanel.style.display = 'none';
+      return;
+    }
+    teamNotInPanel.style.display = 'none';
+    teamInPanel.style.display = '';
+    teamNameDisplayEl.textContent = `${organization.name} — you're ${organization.role === 'owner' ? 'the owner' : 'a member'}`;
+    inviteTeamBtn.style.display = organization.role === 'owner' ? '' : 'none';
+    deleteTeamBtn.style.display = organization.role === 'owner' ? '' : 'none';
+    leaveTeamBtn.style.display = organization.role === 'owner' ? 'none' : '';
+
+    teamMembersListEl.innerHTML = '';
+    for (const member of members ?? []) {
+      const row = document.createElement('div');
+      row.className = 'account-row';
+      const label = document.createElement('span');
+      label.className = 'account-email';
+      label.textContent = member.email ?? '(no email on file)';
+      if (member.role === 'owner') {
+        const tag = document.createElement('span');
+        tag.className = 'account-active-tag';
+        tag.textContent = 'Owner';
+        label.appendChild(tag);
+      }
+      row.appendChild(label);
+      teamMembersListEl.appendChild(row);
+    }
+  } catch {
+    teamStatusEl.textContent = 'Could not load team status. Try again in a moment.';
+  }
+}
+
+createTeamBtn.addEventListener('click', async () => {
+  const name = teamNameInput.value.trim();
+  if (!name) {
+    teamStatusEl.textContent = 'Enter a team name first.';
+    return;
+  }
+  const settings = await getSettings();
+  if (!settings.apiKey) return;
+  createTeamBtn.disabled = true;
+  teamStatusEl.textContent = 'Creating team…';
+  try {
+    await createOrganization(settings.apiKey, { name });
+    teamNameInput.value = '';
+    teamStatusEl.textContent = 'Team created.';
+    await refreshTeamView(settings.apiKey);
+  } catch (err) {
+    teamStatusEl.textContent =
+      err instanceof MailTrackApiError && err.status === 402
+        ? 'An active subscription is required to create a team.'
+        : 'Could not create the team. Try again in a moment.';
+  } finally {
+    createTeamBtn.disabled = false;
+  }
+});
+
+joinTeamBtn.addEventListener('click', async () => {
+  const code = teamJoinCodeInput.value.trim();
+  if (!code) {
+    teamStatusEl.textContent = 'Paste an invite code first.';
+    return;
+  }
+  const settings = await getSettings();
+  if (!settings.apiKey) return;
+  joinTeamBtn.disabled = true;
+  teamStatusEl.textContent = 'Joining team…';
+  try {
+    await joinOrganization(settings.apiKey, { code });
+    teamJoinCodeInput.value = '';
+    teamStatusEl.textContent = 'Joined the team.';
+    await refreshTeamView(settings.apiKey);
+  } catch {
+    teamStatusEl.textContent = 'Could not join with that code — it may be invalid, expired, or already used.';
+  } finally {
+    joinTeamBtn.disabled = false;
+  }
+});
+
+inviteTeamBtn.addEventListener('click', async () => {
+  const settings = await getSettings();
+  if (!settings.apiKey) return;
+  inviteTeamBtn.disabled = true;
+  teamStatusEl.textContent = 'Generating invite code…';
+  try {
+    const { code } = await createOrgInvite(settings.apiKey);
+    try {
+      await navigator.clipboard.writeText(code);
+      teamStatusEl.textContent = `Invite code copied to clipboard: ${code} (valid 7 days). Share it with your teammate however you'd like.`;
+    } catch {
+      teamStatusEl.textContent = `Invite code (valid 7 days): ${code}`;
+    }
+  } catch {
+    teamStatusEl.textContent = 'Could not generate an invite code. Try again in a moment.';
+  } finally {
+    inviteTeamBtn.disabled = false;
+  }
+});
+
+leaveTeamBtn.addEventListener('click', async () => {
+  if (!confirm('Leave this team? You will lose visibility into teammates\' tracked sends.')) return;
+  const settings = await getSettings();
+  if (!settings.apiKey) return;
+  leaveTeamBtn.disabled = true;
+  try {
+    await leaveOrganization(settings.apiKey);
+    teamStatusEl.textContent = 'Left the team.';
+    await refreshTeamView(settings.apiKey);
+  } catch {
+    teamStatusEl.textContent = 'Could not leave the team. Try again in a moment.';
+  } finally {
+    leaveTeamBtn.disabled = false;
+  }
+});
+
+deleteTeamBtn.addEventListener('click', async () => {
+  if (!confirm('Delete this team? This removes every member\'s shared visibility and cannot be undone.')) return;
+  const settings = await getSettings();
+  if (!settings.apiKey) return;
+  deleteTeamBtn.disabled = true;
+  try {
+    await deleteOrganization(settings.apiKey);
+    teamStatusEl.textContent = 'Team deleted.';
+    await refreshTeamView(settings.apiKey);
+  } catch {
+    teamStatusEl.textContent = 'Could not delete the team. Try again in a moment.';
+  } finally {
+    deleteTeamBtn.disabled = false;
+  }
+});
 
 document.getElementById('saveCurrentAccount')?.addEventListener('click', async () => {
   const gmailEmail = saveAccountGmailEmailInput.value.trim().toLowerCase();

@@ -3,11 +3,18 @@ import type {
   CancelSubscriptionResponse,
   CreateCheckoutRequest,
   CreateCheckoutResponse,
+  CreateInviteResponse,
   CreateMessageRequest,
   CreateMessageResponse,
+  CreateOrganizationRequest,
+  CreateOrganizationResponse,
   EventsPollResponse,
+  GetOrganizationResponse,
+  JoinOrganizationRequest,
+  JoinOrganizationResponse,
   MessageListResponse,
   MessageStatusResponse,
+  OrgMessagesResponse,
   ReportBounceRequest,
   ReportBounceResponse,
   ReportPeriod,
@@ -148,4 +155,39 @@ export async function provisionApiKey(supabaseAccessToken: string): Promise<{ ap
   });
   if (!response.ok) throw new MailTrackApiError(`Provisioning failed with ${response.status}`, response.status);
   return response.json();
+}
+
+// ADR-60 (team accounts). getOrganization() returns { organization: null }
+// (not a 404) for "not in a team" — the caller checks the field, no
+// try/catch needed for the common case.
+export function createOrganization(apiKey: string, body: CreateOrganizationRequest): Promise<CreateOrganizationResponse> {
+  return request<CreateOrganizationResponse>('/v1/orgs', apiKey, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function getOrganization(apiKey: string): Promise<GetOrganizationResponse> {
+  return request<GetOrganizationResponse>('/v1/orgs/me', apiKey);
+}
+
+/** Owner-only — the backend rejects this with 403 for a non-owner member. */
+export function createOrgInvite(apiKey: string): Promise<CreateInviteResponse> {
+  return request<CreateInviteResponse>('/v1/orgs/invite', apiKey, { method: 'POST' });
+}
+
+export function joinOrganization(apiKey: string, body: JoinOrganizationRequest): Promise<JoinOrganizationResponse> {
+  return request<JoinOrganizationResponse>('/v1/orgs/join', apiKey, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** Non-owner members only — the backend rejects this for the owner (delete the team instead). */
+export function leaveOrganization(apiKey: string): Promise<{ left: boolean }> {
+  return request('/v1/orgs/leave', apiKey, { method: 'POST' });
+}
+
+/** Owner-only — cascades members and invites. */
+export function deleteOrganization(apiKey: string): Promise<{ deleted: boolean }> {
+  return request('/v1/orgs', apiKey, { method: 'DELETE' });
+}
+
+/** Same pagination shape as listMessages, scoped to every member of the caller's team. */
+export function listOrgMessages(apiKey: string, offset = 0): Promise<OrgMessagesResponse> {
+  return request<OrgMessagesResponse>(`/v1/orgs/messages?offset=${offset}`, apiKey);
 }
