@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MailTrack</title>
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        margin: 0;
+        padding: 1rem;
+        color: #202124;
+      }
+      h1 { font-size: 1.05rem; margin: 0 0 0.25rem; }
+      p.subtitle { font-size: 0.82rem; color: #5f6368; margin: 0 0 1.25rem; }
+      label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.3rem; }
+      input[type="email"], input[type="password"] {
+        width: 100%; box-sizing: border-box; padding: 0.5rem 0.6rem; margin-bottom: 0.85rem;
+        border: 1px solid #dadce0; border-radius: 6px; font-size: 0.9rem;
+      }
+      .button-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+      button {
+        font-size: 0.85rem; padding: 0.5rem 0.85rem; border-radius: 6px; cursor: pointer;
+        border: 1px solid #dadce0; background: #fff;
+      }
+      button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+      #authStatus, #signedInStatus { font-size: 0.82rem; margin-top: 0.75rem; min-height: 1.1em; }
+      #authStatus[data-error] { color: #d93025; }
+      .toggle-row { display: flex; align-items: center; gap: 0.5rem; margin: 1rem 0; font-size: 0.88rem; }
+      #signedInPanel { display: none; }
+      #signedOutPanel.hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>MailTrack</h1>
+    <p class="subtitle">Verified opens and clicks — never a raw pixel-fetch claim.</p>
+
+    <div id="signedOutPanel">
+      <label for="email">Email</label>
+      <input type="email" id="email" autocomplete="email" />
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password" minlength="6" />
+      <div class="button-row">
+        <button class="primary" id="logIn">Log in</button>
+        <button id="signUp">Sign up</button>
+      </div>
+      <div id="authStatus" role="status" aria-live="polite"></div>
+    </div>
+
+    <div id="signedInPanel">
+      <p id="signedInEmail"></p>
+      <div class="toggle-row">
+        <input type="checkbox" id="trackingEnabled" />
+        <label for="trackingEnabled" style="margin:0">Track new sends</label>
+      </div>
+      <button id="signOut">Sign out</button>
+      <div id="signedInStatus" role="status" aria-live="polite"></div>
+    </div>
+
+    <script type="module" src="/src/taskpane.ts"></script>
+  </body>
+</html>

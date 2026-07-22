@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ADR-61 (Outlook add-in, C2). Add-in-only XML manifest — required because
+  the ItemSend on-send LaunchEvent is only supported by this older manifest
+  format, not Microsoft's newer unified manifest (confirmed via Microsoft's
+  own docs during the research spike; see PLAN.md). Served at
+  https://mailtrack-api.heyttsatra17.workers.dev/outlook/manifest.xml
+  (apps/backend/src/pages/outlook-addin.ts) — sideload-testing only for now,
+  not yet submitted to AppSource (see PLAN.md's explicitly-out-of-scope list).
+-->
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
+  xsi:type="MailApp">
+
+  <Id>161a9e33-7fb4-454f-855b-770378e13588</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>MailTrack</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="MailTrack" />
+  <Description DefaultValue="Gmail-tracker-quality email tracking for Outlook: verified opens and clicks, never a raw pixel-fetch claim." />
+  <IconUrl DefaultValue="https://mailtrack-api.heyttsatra17.workers.dev/outlook/icon-32.png" />
+  <HighResIconUrl DefaultValue="https://mailtrack-api.heyttsatra17.workers.dev/outlook/icon-80.png" />
+  <SupportUrl DefaultValue="https://mailtrack-api.heyttsatra17.workers.dev/" />
+
+  <AppDomains>
+    <AppDomain>https://mailtrack-api.heyttsatra17.workers.dev</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Mailbox" />
+  </Hosts>
+
+  <Requirements>
+    <Sets>
+      <Set Name="Mailbox" MinVersion="1.13" />
+    </Sets>
+  </Requirements>
+
+  <FormSettings>
+    <Form xsi:type="ItemEdit">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://mailtrack-api.heyttsatra17.workers.dev/outlook/taskpane.html" />
+        <RequestedHeight>250</RequestedHeight>
+      </DesktopSettings>
+    </Form>
+  </FormSettings>
+
+  <Permissions>ReadWriteItem</Permissions>
+
+  <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Edit" />
+  </Rule>
+
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.13">
+        <bt:Set Name="Mailbox" MinVersion="1.13" />
+      </bt:Sets>
+    </Requirements>
+    <Hosts>
+      <Host xsi:type="MailHost">
+        <Runtimes>
+          <Runtime resid="functionFileUrl" lifetime="short">
+            <Override type="javascript" resid="functionFileUrl" />
+          </Runtime>
+        </Runtimes>
+        <DesktopFormFactor>
+          <FunctionFile resid="functionFileUrl" />
+          <ExtensionPoint xsi:type="LaunchEvent">
+            <!--
+              ADR-61 fix: the LaunchEvent Type value for this (Smart Alerts /
+              Office.actions.associate) registration path is "OnMessageSend",
+              NOT "ItemSend" — "ItemSend" is the Type value for the older,
+              separate `xsi:type="Events"` on-send mechanism, a different
+              extension point entirely. Using the wrong Type here caused
+              Microsoft's own manifest validator to fail with cascading,
+              generically-worded errors ("Package Type Not Identified",
+              "Wrong Package") rather than a clear "invalid Type value"
+              message — confirmed by cross-checking Microsoft's official
+              Smart Alerts walkthrough sample manifest.
+            -->
+            <LaunchEvents>
+              <LaunchEvent Type="OnMessageSend" FunctionName="onMessageSend" SendMode="SoftBlock" />
+            </LaunchEvents>
+            <SourceLocation resid="functionFileUrl" />
+          </ExtensionPoint>
+          <ExtensionPoint xsi:type="MessageComposeCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="mailtrackGroup">
+                <Label resid="groupLabel" />
+                <Control xsi:type="Button" id="mailtrackTaskpaneButton">
+                  <Label resid="taskpaneButtonLabel" />
+                  <Supertip>
+                    <Title resid="taskpaneButtonLabel" />
+                    <Description resid="taskpaneButtonTooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="icon16" />
+                    <bt:Image size="32" resid="icon32" />
+                    <bt:Image size="80" resid="icon80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="taskpaneUrl" />
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <bt:Images>
+        <bt:Image id="icon16" DefaultValue="https://mailtrack-api.heyttsatra17.workers.dev/outlook/icon-16.png" />
+        <bt:Image id="icon32" DefaultValue="https://mailtrack-api.heyttsatra17.workers.dev/outlook/icon-32.png" />
+        <bt:Image id="icon80" DefaultValue="https://mailtrack-api.heyttsatra17.workers.dev/outlook/icon-80.png" />
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="functionFileUrl" DefaultValue="https://mailtrack-api.heyttsatra17.workers.dev/outlook/functions.html" />
+        <bt:Url id="taskpaneUrl" DefaultValue="https://mailtrack-api.heyttsatra17.workers.dev/outlook/taskpane.html" />
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="groupLabel" DefaultValue="MailTrack" />
+        <bt:String id="taskpaneButtonLabel" DefaultValue="MailTrack" />
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="taskpaneButtonTooltip" DefaultValue="Sign in and manage MailTrack settings" />
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

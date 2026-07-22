@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MailTrack functions</title>
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  </head>
+  <body>
+    <!--
+      ADR-61 (Outlook add-in, C2). The on-send "function file" — no visible
+      UI; this page's only job is to load office.js and register the
+      ItemSend handler (src/functions.ts) via Office.actions.associate.
+      Served from the same origin as taskpane.html so localStorage
+      (src/storage.ts) is shared between them.
+    -->
+    <script type="module" src="/src/functions.ts"></script>
+  </body>
+</html>
